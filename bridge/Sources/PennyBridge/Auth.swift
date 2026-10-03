@@ -55,7 +55,7 @@ enum Auth {
         var devices = JSONFile.read([Device].self, from: Paths.devices) ?? []
         devices.append(Device(name: String(deviceName.prefix(100)), tokenHash: hash(token), created: Date()))
         try JSONFile.write(devices, to: Paths.devices)
-        Log.info("Sparowano urządzenie „\(deviceName)”")
+        Log.info("Paired device “\(deviceName)”")
         return token
     }
 

@@ -41,7 +41,7 @@ final class TransactionWriter {
     func create(_ request: NewTransactionRequest, snapshot: MoneySnapshot) throws -> String {
         var created = JSONFile.read([String: CreatedRecord].self, from: Paths.created) ?? [:]
         if let existing = created[request.clientId] {
-            Log.info("Transakcja \(request.clientId) już zapisana jako \(existing.transactionId)")
+            Log.info("Transaction \(request.clientId) already saved as \(existing.transactionId)")
             return existing.transactionId
         }
         guard config.writesEnabled else { throw BridgeError.invalid("Zapis jest wyłączony w konfiguracji mostu.", en: "Writing is turned off in the bridge configuration.") }
@@ -74,7 +74,7 @@ final class TransactionWriter {
                                   conventions: conventions, newState: config.syncNewState)
             transactionID = inserted.transactionID
         } catch {
-            Log.error("Zapis nie powiódł się, przywracam kopię: \(error)")
+            Log.error("Write failed, restoring the backup: \(error)")
             try? backups.restore(backup, stores: stores)
             throw error
         }
@@ -82,7 +82,7 @@ final class TransactionWriter {
         created[request.clientId] = CreatedRecord(transactionId: transactionID, created: Date())
         let cutoff = Date().addingTimeInterval(-180 * 86400)
         try? JSONFile.write(created.filter { $0.value.created > cutoff }, to: Paths.created)
-        Log.info("Dodano transakcję \(transactionID): \(plan.signedAmount.plainString) na koncie „\(plan.account.name)”")
+        Log.info("Added transaction \(transactionID): \(plan.signedAmount.plainString) in account “\(plan.account.name)”")
         return transactionID
     }
 

@@ -97,7 +97,7 @@ enum MoneyLocator {
             throw BridgeError.setup("Nie znaleziono bazy Money (Money.sqlite). Czy Money był uruchomiony na tym Macu?", en: "Money's database (Money.sqlite) not found. Has Money been opened on this Mac?")
         }
         if candidates.count > 1 {
-            Log.info("Znaleziono \(candidates.count) baz Money, wybieram najnowszą: \(best.path)")
+            Log.info("Found \(candidates.count) Money databases, using the newest: \(best.path)")
         }
         return best
     }

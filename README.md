@@ -2,6 +2,12 @@
 
 An Android app for viewing and adding transactions in **Money** (Jumsoft), synced through iCloud.
 
+<p align="center">
+  <img src="docs/screenshots/home.png" width="250" alt="Accounts grouped by folder with balances">
+  <img src="docs/screenshots/recent.png" width="250" alt="Recent transactions across all accounts">
+  <img src="docs/screenshots/add.png" width="250" alt="Adding a new transaction">
+</p>
+
 ## How it works
 
 Money keeps its data in a private **CloudKit** database (`iCloud.com.jumsoft.money`), not as a file on iCloud Drive.
@@ -80,9 +86,25 @@ The settings screen (gear icon on the main screen) offers:
 | `penny-bridge devices` / `revoke NAME` | paired devices |
 | `penny-bridge install` / `uninstall` | LaunchAgent service |
 | `penny-bridge selftest` | write test on a throwaway database built from Money's model |
+| `penny-bridge demo DIR` | database with made-up data, for screenshots and trying the app |
 
 Configuration: `~/Library/Application Support/PennyBridge/config.json`, including `port`, `writesEnabled`
 (turns writing off) and `launchMoneyAfterWrite`.
+
+## Demo data
+
+`penny-bridge demo DIR` builds a database in Money's format with made-up accounts and four months of transactions
+(the screenshots above use it), plus a bridge configuration that serves it on port 8766 as "Penny Demo" without touching
+Money.app. It needs Money.app installed, for the data model.
+
+```bash
+cd bridge && swift build
+.build/debug/penny-bridge demo /tmp/penny-demo
+PENNY_BRIDGE_HOME=/tmp/penny-demo/home .build/debug/penny-bridge serve
+PENNY_BRIDGE_HOME=/tmp/penny-demo/home .build/debug/penny-bridge pair   # in another terminal
+```
+
+Transactions added from the phone are written to the demo database.
 
 ## Limitations
 

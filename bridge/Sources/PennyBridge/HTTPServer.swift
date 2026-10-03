@@ -111,13 +111,13 @@ final class HTTPServer {
                 ready.signal()
             case .failed(let error):
                 failure = error
-                Log.error("Serwer HTTP: \(error)")
+                Log.error("HTTP server: \(error)")
                 ready.signal()
             default: break
             }
         }
         listener.serviceRegistrationUpdateHandler = { change in
-            if case .add(let endpoint) = change { Log.info("Bonjour: ogłaszam \(endpoint)") }
+            if case .add(let endpoint) = change { Log.info("Bonjour: advertising \(endpoint)") }
         }
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
         listener.start(queue: ioQueue)

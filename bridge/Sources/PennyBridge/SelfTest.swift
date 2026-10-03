@@ -27,23 +27,23 @@ enum SelfTest {
             syncStoreURL: tmp.appendingPathComponent("QSSyncStore.sqlite"))
         let ids = try seed(location)
 
-        print("Język komunikatów")
+        print("Message language")
         let languages: [(String?, Language)] = [
             (nil, .polish), ("", .polish), ("pl-PL", .polish), ("en-US", .english), ("de-DE", .english),
             ("pl-PL,en;q=0.8", .polish), ("en-US,pl;q=0.9", .english), ("de-DE,pl;q=0.9,en;q=0.8", .polish),
             ("en;q=0.5, pl;q=0.9", .polish), ("pl;q=0,en", .english),
         ]
         for (header, expected) in languages {
-            check(Language(acceptLanguage: header) == expected, "Accept-Language \(header.map { "„\($0)”" } ?? "brak") → \(expected)")
+            check(Language(acceptLanguage: header) == expected, "Accept-Language \(header.map { "“\($0)”" } ?? "none") → \(expected)")
         }
 
         let macOnly = BridgeError.setup("Brak dostępu do /Users/x/Money.sqlite", en: "No access to /Users/x/Money.sqlite")
         check(!macOnly.clientMessage(in: .english).contains("/Users") && macOnly.clientMessage(in: .polish).contains("doctor"),
-              "błąd po stronie Maca bez szczegółów dla telefonu")
+              "Mac-side error without details for the phone")
         let invalid = BridgeError.invalid("Kwota musi być dodatnia.", en: "The amount must be positive.")
-        check(invalid.clientMessage(in: .english) == invalid.englishMessage, "błąd danych trafia do telefonu bez zmian")
+        check(invalid.clientMessage(in: .english) == invalid.englishMessage, "data error reaches the phone unchanged")
 
-        print("Serwer HTTP")
+        print("HTTP server")
         let api = API(config: config, serviceName: "selftest", location: location, controlsMoneyApp: false)
         let server = try HTTPServer(port: 0, serviceName: nil, handler: api.handle)
         try server.start()
@@ -51,35 +51,35 @@ enum SelfTest {
         let base = "http://127.0.0.1:\(server.port)/api/v1"
 
         let ping = try call("GET", "\(base)/ping")
-        check(ping.status == 200, "ping bez autoryzacji")
+        check(ping.status == 200, "ping without auth")
         let unauthorized = try call("GET", "\(base)/snapshot")
-        check(unauthorized.status == 401, "snapshot bez tokenu → 401")
-        check(unauthorized.errorMessage == "Brak autoryzacji. Sparuj urządzenie ponownie.", "komunikat po polsku bez nagłówka")
+        check(unauthorized.status == 401, "snapshot without a token → 401")
+        check(unauthorized.errorMessage == "Brak autoryzacji. Sparuj urządzenie ponownie.", "Polish message without the header")
         let unauthorizedEN = try call("GET", "\(base)/snapshot", language: "en-US")
-        check(unauthorizedEN.errorMessage == "Not authorized. Pair the device again.", "komunikat po angielsku dla en-US")
+        check(unauthorizedEN.errorMessage == "Not authorized. Pair the device again.", "English message for en-US")
 
         let code = try Auth.startPairing()
         check(try call("POST", "\(base)/pair", body: ["code": "abcdef", "deviceName": "x"]).status == 401,
-              "zły kod parowania odrzucony")
+              "wrong pairing code rejected")
         let pair = try call("POST", "\(base)/pair", body: ["code": code, "deviceName": "Test phone"])
         let token = pair.json["token"] as? String ?? ""
-        check(pair.status == 200 && !token.isEmpty, "parowanie zwraca token")
+        check(pair.status == 200 && !token.isEmpty, "pairing returns a token")
 
-        print("Odczyt")
+        print("Reading")
         let snap = try call("GET", "\(base)/snapshot", token: token)
         let accounts = snap.json["accounts"] as? [[String: Any]] ?? []
-        check(accounts.count == 1, "1 konto")
+        check(accounts.count == 1, "1 account")
         check(accounts.first?["folder"] as? String == "Archiwum" && accounts.first?["folderId"] is String,
-              "folder konta z identyfikatorem")
-        check(accounts.first?["balance"] as? String == "90", "saldo 100 - 10 = 90 (jest \(accounts.first?["balance"] ?? "-"))")
+              "account folder with an identifier")
+        check(accounts.first?["balance"] as? String == "90", "balance 100 - 10 = 90 (got \(accounts.first?["balance"] ?? "-"))")
         let categories = snap.json["categories"] as? [[String: Any]] ?? []
         let food = categories.first { $0["id"] as? String == ids.food }
-        check(food?["kind"] as? String == "expense", "kategoria Jedzenie rozpoznana jako wydatek")
-        check(categories.first { $0["id"] as? String == ids.salary }?["kind"] as? String == "income", "Pensja jako przychód")
+        check(food?["kind"] as? String == "expense", "category Jedzenie recognized as expense")
+        check(categories.first { $0["id"] as? String == ids.salary }?["kind"] as? String == "income", "Pensja as income")
         check(categories.first { $0["name"] as? String == "Balance Adjustment" }?["kind"] as? String == "system",
-              "kategoria systemowa ukryta")
+              "system category hidden")
 
-        print("Zapis")
+        print("Writing")
         let clientId = UUID().uuidString
         let newTx: [String: Any] = [
             "clientId": clientId, "accountId": ids.account, "date": "2026-10-01T12:00:00Z", "kind": "expense",
@@ -87,65 +87,65 @@ enum SelfTest {
         ]
         let created = try call("POST", "\(base)/transactions", token: token, body: newTx)
         check(created.status == 201, "POST /transactions → 201 (\(created.status) \(created.text))")
-        check(created.json["amount"] as? String == "-12.34", "kwota wydatku ujemna")
-        check(created.json["kind"] as? String == "expense", "rodzaj: wydatek")
-        check(created.json["payee"] as? String == "Biedronka", "odbiorca zapisany")
+        check(created.json["amount"] as? String == "-12.34", "expense amount negative")
+        check(created.json["kind"] as? String == "expense", "kind: expense")
+        check(created.json["payee"] as? String == "Biedronka", "payee saved")
         let createdID = created.json["id"] as? String ?? "?"
 
         let again = try call("POST", "\(base)/transactions", token: token, body: newTx)
-        check(again.json["id"] as? String == createdID, "ponowienie z tym samym clientId nie dubluje")
+        check(again.json["id"] as? String == createdID, "retry with the same clientId doesn't duplicate")
 
         let income = try call("POST", "\(base)/transactions", token: token, body: [
             "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-02T08:30:00.000Z",
             "kind": "income", "amount": "5,5",
         ])
-        check(income.status == 201 && income.json["amount"] as? String == "5.5", "przychód bez kategorii, przecinek w kwocie")
+        check(income.status == 201 && income.json["amount"] as? String == "5.5", "income without a category, comma in the amount")
 
         let bad = try call("POST", "\(base)/transactions", token: token, body: [
             "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-02T08:30:00Z",
             "kind": "expense", "amount": "-3",
         ])
-        check(bad.status == 422, "ujemna kwota odrzucona")
-        check(bad.errorMessage == "Nieprawidłowa kwota: -3", "powód odrzucenia po polsku (\(bad.errorMessage ?? "-"))")
+        check(bad.status == 422, "negative amount rejected")
+        check(bad.errorMessage == "Nieprawidłowa kwota: -3", "rejection reason in Polish (\(bad.errorMessage ?? "-"))")
         let badEN = try call("POST", "\(base)/transactions", token: token, language: "en-US,en;q=0.9", body: [
             "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-02T08:30:00Z",
             "kind": "expense", "amount": "-3",
         ])
-        check(badEN.errorMessage == "Invalid amount: -3", "powód odrzucenia po angielsku (\(badEN.errorMessage ?? "-"))")
+        check(badEN.errorMessage == "Invalid amount: -3", "rejection reason in English (\(badEN.errorMessage ?? "-"))")
 
         let page = try call("GET", "\(base)/transactions?accountId=\(ids.account)&limit=2", token: token)
-        check(page.json["total"] as? Int == 4, "4 transakcje na koncie")
-        check((page.json["items"] as? [[String: Any]])?.count == 2, "stronicowanie")
+        check(page.json["total"] as? Int == 4, "4 transactions in the account")
+        check((page.json["items"] as? [[String: Any]])?.count == 2, "paging")
         let snap2 = try call("GET", "\(base)/snapshot", token: token)
         let balance = (snap2.json["accounts"] as? [[String: Any]])?.first?["balance"] as? String
-        check(balance == "83.16", "saldo po zapisie 90 - 12.34 + 5.5 = 83.16 (jest \(balance ?? "-"))")
+        check(balance == "83.16", "balance after writes 90 - 12.34 + 5.5 = 83.16 (got \(balance ?? "-"))")
 
-        print("Baza Money (SQL)")
+        print("Money database (SQL)")
         let db = try SQLiteDB(path: location.storeURL.path)
         let rows = try db.query("""
             SELECT t.ZTRANSACTIONTYPE type, t.ZISSCHEDULEDTRANSACTION sched, t.ZPAYEE payee, s.ZTYPE stype,
                    s.Z_FOK_TRANSACTION fok, s.ZAMOUNTINACCOUNTCURRENCY acc
             FROM ZTRANSACTION t JOIN ZTRANSACTIONSPLIT s ON s.ZTRANSACTION = t.Z_PK WHERE t.ZUNIQUEIDENTIFIER = ?
             """, [createdID])
-        check(rows.count == 1, "jedna pozycja (split)")
-        check(rows.first?["type"] as? Int64 == 21, "transactionType skopiowany z wzorca (21)")
-        check(rows.first?["stype"] as? Int64 == 7, "split.type skopiowany z wzorca (7)")
-        check(rows.first?["sched"] as? Int64 == 0, "flaga isScheduledTransaction skopiowana")
-        check(rows.first?["payee"] != nil && rows.first?["fok"] != nil, "relacje payee i uporządkowany split")
+        check(rows.count == 1, "one split")
+        check(rows.first?["type"] as? Int64 == 21, "transactionType copied from the template (21)")
+        check(rows.first?["stype"] as? Int64 == 7, "split.type copied from the template (7)")
+        check(rows.first?["sched"] as? Int64 == 0, "isScheduledTransaction flag copied")
+        check(rows.first?["payee"] != nil && rows.first?["fok"] != nil, "payee relationship and ordered split")
         let maxPK = try db.query("SELECT Z_MAX m FROM Z_PRIMARYKEY WHERE Z_NAME = 'Transaction'").first?["m"] as? Int64
-        check(maxPK == 4, "Z_PRIMARYKEY zaktualizowany")
+        check(maxPK == 4, "Z_PRIMARYKEY updated")
 
         print("SyncKit")
         let sync = try SQLiteDB(path: location.syncStoreURL!.path)
         let tracked = try sync.query("SELECT ZIDENTIFIER i, ZENTITYTYPE t, ZSTATE s FROM ZQSSYNCEDENTITY WHERE ZSTATE = 0")
-        check(tracked.count == 5, "5 nowych wpisów do wysłania (2× transakcja, 2× split, odbiorca) — jest \(tracked.count)")
-        check(tracked.contains { $0["i"] as? String == "Transaction.\(createdID)" }, "identyfikator „Transaction.<uuid>”")
-        check(Set(tracked.compactMap { $0["t"] as? String }) == ["Transaction", "TransactionSplit", "Payee"], "typy encji")
+        check(tracked.count == 5, "5 new rows to upload (2× transaction, 2× split, payee) — got \(tracked.count)")
+        check(tracked.contains { $0["i"] as? String == "Transaction.\(createdID)" }, "identifier “Transaction.<uuid>”")
+        check(Set(tracked.compactMap { $0["t"] as? String }) == ["Transaction", "TransactionSplit", "Payee"], "entity types")
 
         let backups = (try? FileManager.default.contentsOfDirectory(atPath: Paths.backups.path)) ?? []
-        check(backups.count == 2, "kopie zapasowe przed każdym zapisem")
+        check(backups.count == 2, "backups before every write")
 
-        print(failures == 0 ? "\nWSZYSTKO OK" : "\nBŁĘDY: \(failures)")
+        print(failures == 0 ? "\nALL OK" : "\nFAILURES: \(failures)")
         if failures > 0 { exit(1) }
     }
 

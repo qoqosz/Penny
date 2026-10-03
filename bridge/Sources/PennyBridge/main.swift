@@ -15,6 +15,12 @@ do {
     case "devices": Commands.devices()
     case "revoke": try Commands.revoke(arguments.dropFirst().joined(separator: " "))
     case "selftest": try SelfTest.run()
+    case "demo":
+        guard let dir = arguments.dropFirst().first else {
+            Commands.help()
+            exit(2)
+        }
+        try DemoData.create(at: URL(fileURLWithPath: dir))
     case "help", "-h", "--help": Commands.help()
     default:
         Commands.help()

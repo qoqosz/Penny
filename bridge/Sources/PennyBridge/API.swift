@@ -44,7 +44,7 @@ final class API {
         do {
             return try route(request)
         } catch let error as BridgeError {
-            if error.status >= 500 { Log.error(error.message) }
+            if error.status >= 500 { Log.error(error.englishMessage) }
             return .error(error, in: language)
         } catch {
             Log.error("\(error)")
@@ -120,7 +120,7 @@ final class API {
         if let snapshot, snapshot.generation == generation { return snapshot }
         let started = Date()
         let fresh = try MoneyReader.read(model: model, storeURL: location.storeURL)
-        Log.info("Wczytano dane Money: \(fresh.accounts.count) kont, \(fresh.transactions.count) transakcji "
+        Log.info("Loaded Money data: \(fresh.accounts.count) accounts, \(fresh.transactions.count) transactions "
             + "(\(Int(Date().timeIntervalSince(started) * 1000)) ms)")
         snapshot = fresh
         return fresh

@@ -16,7 +16,7 @@ final class MoneyAppController {
     func quit(timeout: TimeInterval) throws -> Bool {
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
         guard !apps.isEmpty else { return false }
-        Log.info("Zamykam Money na czas zapisu…")
+        Log.info("Quitting Money for the write…")
         for app in apps { app.terminate() }
         let pids = apps.map(\.processIdentifier)
         let deadline = Date().addingTimeInterval(timeout)
@@ -41,7 +41,7 @@ final class MoneyAppController {
         config.addsToRecentItems = false
         let done = DispatchSemaphore(value: 0)
         NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, error in
-            if let error { Log.warn("Nie udało się uruchomić Money: \(error.localizedDescription)") }
+            if let error { Log.warn("Couldn't launch Money: \(error.localizedDescription)") }
             done.signal()
         }
         _ = done.wait(timeout: .now() + 20)
@@ -97,7 +97,7 @@ struct BackupManager {
         for (name, original) in manifest.files {
             try fm.copyItem(at: dir.appendingPathComponent(name), to: URL(fileURLWithPath: original))
         }
-        Log.warn("Przywrócono kopię zapasową \(dir.lastPathComponent)")
+        Log.warn("Restored backup \(dir.lastPathComponent)")
     }
 
     private func prune() {

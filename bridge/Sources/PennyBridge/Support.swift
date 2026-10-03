@@ -44,15 +44,15 @@ enum Language: Equatable {
     }
 }
 
-/// Error carrying an HTTP status and a user-facing message that the Android app shows as-is, in Polish (CLI, log)
-/// and English (API clients that ask for it).
+/// Error carrying an HTTP status and a user-facing message that the Android app shows as-is, in Polish and English
+/// (picked by the request's `Accept-Language`). The CLI and the log use the English one.
 struct BridgeError: Error, CustomStringConvertible {
     let status: Int
     let code: String
     let message: String
     let englishMessage: String
 
-    var description: String { message }
+    var description: String { englishMessage }
 
     func message(in language: Language) -> String { language == .polish ? message : englishMessage }
 
@@ -145,7 +145,7 @@ enum JSONFile {
         do {
             return try decoder.decode(type, from: data)
         } catch {
-            Log.warn("Nie można odczytać \(url.path): \(error)")
+            Log.warn("Can't read \(url.path): \(error)")
             return nil
         }
     }

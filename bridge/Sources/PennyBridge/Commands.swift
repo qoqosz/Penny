@@ -4,19 +4,20 @@ import Foundation
 enum Commands {
     static func help() {
         print("""
-        penny-bridge \(bridgeVersion) — most między Money.app a aplikacją Penny na Androidzie
+        penny-bridge \(bridgeVersion) — bridge between Money.app and the Penny Android app
 
-        Użycie: penny-bridge <polecenie>
-          serve        uruchamia serwer (domyślnie)
-          pair         wyświetla kod do sparowania telefonu (ważny 10 min)
-          doctor       sprawdza dostęp do danych Money i pokazuje diagnostykę (--verbose: surowe dane)
-          install      instaluje most jako usługę uruchamianą przy logowaniu
-          uninstall    usuwa usługę
-          devices      lista sparowanych urządzeń
-          revoke NAZWA usuwa sparowane urządzenie
-          selftest     test zapisu na sztucznej bazie (nie dotyka danych Money)
+        Usage: penny-bridge <command>
+          serve        runs the server (default)
+          pair         shows a code for pairing a phone (valid for 10 min)
+          doctor       checks access to Money's data and shows diagnostics (--verbose: raw data)
+          install      installs the bridge as a service that starts at login
+          uninstall    removes the service
+          devices      lists paired devices
+          revoke NAME  removes a paired device
+          selftest     write test on a throwaway database (never touches Money's data)
+          demo DIR     creates a database with made-up data (for screenshots and trying the app)
 
-        Konfiguracja: \(Paths.config.path)
+        Configuration: \(Paths.config.path)
         """)
     }
 
@@ -28,11 +29,11 @@ enum Commands {
         let api = API(config: config, serviceName: name, controlsMoneyApp: config.controlMoneyApp)
         let server = try HTTPServer(port: UInt16(config.port), serviceName: name, handler: api.handle)
         try server.start()
-        Log.info("penny-bridge \(bridgeVersion) nasłuchuje na porcie \(server.port) jako „\(name)”")
+        Log.info("penny-bridge \(bridgeVersion) listening on port \(server.port) as “\(name)”")
         for address in localIPv4Addresses() { Log.info("  http://\(address):\(server.port)") }
         do {
             let snapshot = try api.currentSnapshot()
-            Log.info("Dane Money OK: \(snapshot.accounts.count) kont")
+            Log.info("Money data OK: \(snapshot.accounts.count) accounts")
         } catch {
             Log.warn("\(error)")
         }
@@ -43,74 +44,74 @@ enum Commands {
         let code = try Auth.startPairing()
         print("""
 
-        Kod parowania:  \(code.prefix(3)) \(code.suffix(3))
+        Pairing code:  \(code.prefix(3)) \(code.suffix(3))
 
-        Wpisz go w aplikacji Penny na telefonie (ważny 10 minut).
-        Adresy tego Maca: \(localIPv4Addresses().joined(separator: ", ")), port \(BridgeConfig.load().port)
+        Enter it in the Penny app on the phone (valid for 10 minutes).
+        This Mac's addresses: \(localIPv4Addresses().joined(separator: ", ")), port \(BridgeConfig.load().port)
 
         """)
     }
 
     static func devices() {
         let devices = Auth.devices()
-        if devices.isEmpty { print("Brak sparowanych urządzeń.") }
-        for d in devices { print("• \(d.name) (od \(d.created.formatted()))") }
+        if devices.isEmpty { print("No paired devices.") }
+        for d in devices { print("• \(d.name) (since \(d.created.formatted()))") }
     }
 
     static func revoke(_ name: String) throws {
-        print("Usunięto urządzeń: \(try Auth.revoke(name: name))")
+        print("Devices removed: \(try Auth.revoke(name: name))")
     }
 
     // MARK: - Diagnostics
 
     static func doctor(verbose: Bool) throws {
         let config = BridgeConfig.load()
-        print("penny-bridge \(bridgeVersion)\nKonfiguracja: \(Paths.config.path)\n")
+        print("penny-bridge \(bridgeVersion)\nConfiguration: \(Paths.config.path)\n")
         let location = try MoneyLocator.locate(config)
         let version = Bundle(url: location.appURL)?.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         print("✓ Money.app \(version): \(location.appURL.path)")
-        print("✓ Model danych: \(location.modelURL.lastPathComponent)")
-        print("✓ Baza Money: \(location.storeURL.path)")
+        print("✓ Data model: \(location.modelURL.lastPathComponent)")
+        print("✓ Money database: \(location.storeURL.path)")
         if let sync = location.syncStoreURL {
-            print("✓ Baza SyncKit: \(sync.path)")
+            print("✓ SyncKit database: \(sync.path)")
         } else {
-            print("✗ Nie znaleziono bazy SyncKit — zapis będzie niemożliwy (czy synchronizacja iCloud jest włączona?)")
+            print("✗ SyncKit database not found — writing won't be possible (is iCloud sync turned on?)")
         }
 
         let model = try ModelLoader.load(location.modelURL)
         let snapshot = try MoneyReader.read(model: model, storeURL: location.storeURL)
-        print("✓ Odczyt: \(snapshot.accounts.count) kont, \(snapshot.categories.count) kategorii, "
-            + "\(snapshot.payees.count) odbiorców, \(snapshot.transactions.count) transakcji")
-        print("  Format identyfikatorów: \(snapshot.idStyle.rawValue)")
+        print("✓ Read: \(snapshot.accounts.count) accounts, \(snapshot.categories.count) categories, "
+            + "\(snapshot.payees.count) payees, \(snapshot.transactions.count) transactions")
+        print("  Identifier format: \(snapshot.idStyle.rawValue)")
         let kinds = Dictionary(grouping: snapshot.categories, by: \.kind).mapValues(\.count)
-        print("  Kategorie: \(kinds.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
+        print("  Categories: \(kinds.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
         for kind in [Kind.expense, .income] {
             if let t = snapshot.templatesByKind[kind] {
-                print("  Wzorzec \(kind.rawValue): transactionType=\(t.transactionType) split.type=\(t.splitType) "
-                    + "flags=\(t.flags) currencyCode=\(t.hasCurrencyCode) (z \(t.transactionID))")
+                print("  Template \(kind.rawValue): transactionType=\(t.transactionType) split.type=\(t.splitType) "
+                    + "flags=\(t.flags) currencyCode=\(t.hasCurrencyCode) (from \(t.transactionID))")
             } else {
-                print("✗ Brak wzorca dla \(kind.rawValue)")
+                print("✗ No template for \(kind.rawValue)")
             }
         }
-        print("\nKonta:")
+        print("\nAccounts:")
         for a in snapshot.accounts {
-            print("  \(a.closed ? "(zamknięte) " : "")\(a.name): \(a.balance) \(a.currency) — \(a.transactionCount) transakcji, typ \(a.type)")
+            print("  \(a.closed ? "(closed) " : "")\(a.name): \(a.balance) \(a.currency) — \(a.transactionCount) transactions, type \(a.type)")
         }
 
         if let sync = location.syncStoreURL {
             do {
                 let conventions = try SyncConventions.learn(
                     syncStore: sync, knownTransactionIDs: snapshot.transactions.prefix(200).map(\.id))
-                print("\n✓ SyncKit: identyfikator „\(conventions.identifier(entity: "Transaction", uniqueID: "<id>"))”, "
-                    + "originObjectID=\(conventions.usesOriginObjectID), śledzonych transakcji: "
+                print("\n✓ SyncKit: identifier “\(conventions.identifier(entity: "Transaction", uniqueID: "<id>"))”, "
+                    + "originObjectID=\(conventions.usesOriginObjectID), tracked transactions: "
                     + "\(conventions.trackedTransactions)/\(snapshot.transactions.count)")
-                print("  Stany: \(conventions.stateHistogram.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
+                print("  States: \(conventions.stateHistogram.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
             } catch {
                 print("\n✗ SyncKit: \(error)")
             }
         }
-        print("\nMoney uruchomiony: \(MoneyAppController(appURL: location.appURL).isRunning ? "tak" : "nie")")
-        print("Zapis włączony: \(config.writesEnabled ? "tak" : "nie")")
+        print("\nMoney running: \(MoneyAppController(appURL: location.appURL).isRunning ? "yes" : "no")")
+        print("Writes enabled: \(config.writesEnabled ? "yes" : "no")")
         if verbose { try rawDump(location) }
     }
 
@@ -124,7 +125,7 @@ enum Commands {
             }
         }
         try show("Z_PRIMARYKEY", "SELECT * FROM Z_PRIMARYKEY")
-        try show("transactionType × znak kwoty",
+        try show("transactionType × amount sign",
                  """
                  SELECT t.Z_ENT ent, t.ZTRANSACTIONTYPE type, s.ZTYPE splitType,
                         SUM(s.ZAMOUNT < 0) neg, SUM(s.ZAMOUNT > 0) pos, SUM(s.ZAMOUNT = 0) zero,
@@ -133,11 +134,11 @@ enum Commands {
                  FROM ZTRANSACTION t JOIN ZTRANSACTIONSPLIT s ON s.ZTRANSACTION = t.Z_PK
                  GROUP BY t.Z_ENT, t.ZTRANSACTIONTYPE, s.ZTYPE ORDER BY t.Z_ENT, COUNT(*) DESC
                  """)
-        try show("Kategorie: categoryType × defaultTransactionType",
+        try show("Categories: categoryType × defaultTransactionType",
                  "SELECT ZCATEGORYTYPE ct, ZDEFAULTTRANSACTIONTYPE dtt, COUNT(*) n, SUM(ZACCOUNT IS NOT NULL) withAccount FROM ZCATEGORY GROUP BY 1,2")
-        try show("Flagi transakcji",
+        try show("Transaction flags",
                  "SELECT ZISSCHEDULEDTRANSACTION sched, ZREADONLY ro, ZCREATEDFROMSCHEDULEDTRANSACTION fromSched, ZRECONCILEDSTATUS rec, COUNT(*) n FROM ZTRANSACTION WHERE Z_ENT = (SELECT Z_ENT FROM Z_PRIMARYKEY WHERE Z_NAME='Transaction') GROUP BY 1,2,3,4")
-        try show("Ostatnie transakcje",
+        try show("Recent transactions",
                  """
                  SELECT t.Z_PK pk, t.ZUNIQUEIDENTIFIER uid, datetime(t.ZDATE + 978307200, 'unixepoch', 'localtime') date,
                         datetime(t.ZLASTMODIFICATIONDATE + 978307200, 'unixepoch', 'localtime') modified,
@@ -150,12 +151,12 @@ enum Commands {
                  """)
         if let sync = location.syncStoreURL {
             let sdb = try SQLiteDB(path: sync.path)
-            print("\n== SyncKit: ostatnie wpisy")
+            print("\n== SyncKit: recent rows")
             for row in try sdb.query(
                 "SELECT ZIDENTIFIER, ZENTITYTYPE, ZSTATE, ZCHANGEDKEYS, ZORIGINOBJECTID, datetime(ZUPDATEDDATE + 978307200, 'unixepoch', 'localtime') updated, ZRECORD FROM ZQSSYNCEDENTITY ORDER BY ZUPDATEDDATE DESC LIMIT 12") {
                 print("  " + row.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))
             }
-            print("\n== SyncKit: liczba wpisów wg typu i stanu")
+            print("\n== SyncKit: row count by type and state")
             for row in try sdb.query("SELECT ZENTITYTYPE t, ZSTATE s, COUNT(*) n FROM ZQSSYNCEDENTITY GROUP BY 1,2") {
                 print("  \(row["t"] ?? "-") state=\(row["s"] ?? "-") n=\(row["n"] ?? 0)")
             }
@@ -197,16 +198,16 @@ enum Commands {
             throw BridgeError.internal("launchctl bootstrap nie powiódł się.", en: "launchctl bootstrap failed.")
         }
         print("""
-        ✓ Zainstalowano usługę \(Paths.launchAgentLabel)
+        ✓ Installed the service \(Paths.launchAgentLabel)
           Program: \(target.path)
           Log:     \(Paths.logFile.path)
 
-        WAŻNE: nadaj programowi „Pełny dostęp do dysku”:
-          Ustawienia systemowe → Prywatność i ochrona → Pełny dostęp do dysku → „+”
-          → Cmd+Shift+G → wklej: \(target.path)
-        Następnie zrestartuj usługę:
+        IMPORTANT: grant the program “Full Disk Access”:
+          System Settings → Privacy & Security → Full Disk Access → “+”
+          → Cmd+Shift+G → paste: \(target.path)
+        Then restart the service:
           launchctl kickstart -k \(domain)/\(Paths.launchAgentLabel)
-        i sparuj telefon:
+        and pair the phone:
           \(target.path) pair
         """)
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
@@ -215,7 +216,7 @@ enum Commands {
     static func uninstall() throws {
         _ = launchctl(["bootout", "gui/\(getuid())/\(Paths.launchAgentLabel)"])
         try? FileManager.default.removeItem(at: Paths.launchAgent)
-        print("✓ Usunięto usługę. Dane mostu (tokeny, kopie zapasowe) pozostały w \(Paths.support.path)")
+        print("✓ Removed the service. The bridge's data (tokens, backups) is still in \(Paths.support.path)")
     }
 
     @discardableResult
