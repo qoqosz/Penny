@@ -102,3 +102,11 @@ Configuration: `~/Library/Application Support/PennyBridge/config.json`, includin
 - `bridge/`: Swift, no dependencies (Core Data, SQLite, Network.framework).
 - `android/`: Kotlin, Jetpack Compose, Material 3, OkHttp, kotlinx.serialization, WorkManager, AppCompat (per-app
   language and theme), androidx.biometric.
+
+## Author
+
+Łukasz Bednarski
+
+## License
+
+MIT, see [LICENSE](LICENSE).

@@ -1,11 +1,52 @@
+# macOS
+.DS_Store
+
+# Swift / Xcode (bridge)
 .build/
 .swiftpm/
 *.xcodeproj
-.DS_Store
+xcuserdata/
+DerivedData/
+
+# Android / Gradle
 android/.gradle/
 android/build/
 android/app/build/
+android/app/release/
 android/local.properties
 android/.idea/
 android/.kotlin/
+android/captures/
+.externalNativeBuild/
+.cxx/
 *.iml
+*.apk
+*.aab
+
+# Signing keys and credentials
+*.jks
+*.keystore
+*.p12
+keystore.properties
+signing.properties
+.env
+.env.*
+
+# Penny bridge runtime data and Money store copies (if PENNY_BRIDGE_HOME or a snapshot ends up in the repo)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+QSSyncStore*
+devices.json
+created.json
+pairing.json
+
+# Editors and tools
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+.claude/settings.local.json
+
+# Local notes for Claude Code
+CLAUDE.md
