@@ -28,6 +28,16 @@ class AppPreferences(private val prefs: SharedPreferences) {
     )
     val theme: StateFlow<ThemeMode> = _theme.asStateFlow()
 
+    private val _hiddenFolders = MutableStateFlow(prefs.getStringSet(KEY_HIDDEN_FOLDERS, null).orEmpty().toSet())
+    /** IDs of Money folders whose accounts aren't shown. */
+    val hiddenFolders: StateFlow<Set<String>> = _hiddenFolders.asStateFlow()
+
+    fun setFolderHidden(folderId: String, hidden: Boolean) {
+        val updated = if (hidden) _hiddenFolders.value + folderId else _hiddenFolders.value - folderId
+        prefs.edit { putStringSet(KEY_HIDDEN_FOLDERS, updated) }
+        _hiddenFolders.value = updated
+    }
+
     /** Applies the stored theme; call before any activity is created. */
     fun applyTheme() = AppCompatDelegate.setDefaultNightMode(_theme.value.nightMode)
 
@@ -51,5 +61,6 @@ class AppPreferences(private val prefs: SharedPreferences) {
 
     private companion object {
         const val KEY_THEME = "theme"
+        const val KEY_HIDDEN_FOLDERS = "hidden_folders"
     }
 }

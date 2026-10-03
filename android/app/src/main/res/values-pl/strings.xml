@@ -102,6 +102,21 @@
     <string name="theme_dark">Ciemny</string>
     <string name="settings_language">Język</string>
     <string name="language_system">Zgodnie z systemem</string>
+    <string name="settings_accounts">Konta</string>
+    <string name="hidden_folders_summary">Ukryj zaznaczone foldery. Ich konta nie będą widoczne na ekranie głównym, w sumach ani przy dodawaniu transakcji.</string>
+    <string name="hidden_folders_empty">Foldery z Money pojawią się tutaj po pobraniu kont z Maca.</string>
+    <plurals name="account_count">
+        <item quantity="one">%d konto</item>
+        <item quantity="few">%d konta</item>
+        <item quantity="many">%d kont</item>
+        <item quantity="other">%d konta</item>
+    </plurals>
+    <plurals name="accounts_hidden">
+        <item quantity="one">%d konto ukryte w ustawieniach</item>
+        <item quantity="few">%d konta ukryte w ustawieniach</item>
+        <item quantity="many">%d kont ukrytych w ustawieniach</item>
+        <item quantity="other">%d konta ukrytego w ustawieniach</item>
+    </plurals>
     <string name="settings_security">Bezpieczeństwo</string>
     <string name="lock_title">Blokada aplikacji</string>
     <string name="lock_summary">Wymagaj kodu PIN do otwarcia Penny</string>

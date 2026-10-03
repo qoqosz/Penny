@@ -59,6 +59,8 @@ On first launch Penny looks for the Mac on the network (Bonjour). After choosing
 The settings screen (gear icon on the main screen) offers:
 
 - **Theme:** system default, light or dark.
+- **Accounts:** hide chosen Money folders (e.g. an archive folder). Their accounts disappear from the main screen,
+  the totals and the account picker. Hiding follows the folder, so renaming it in Money doesn't matter.
 - **Language:** system default, English or Polish. On Android 13+ the language can also be changed in the system
   settings (Apps → Penny → Language).
 - **App lock:** a 4–8 digit PIN required to open Penny, optionally with biometric unlock (fingerprint/face, Class 3

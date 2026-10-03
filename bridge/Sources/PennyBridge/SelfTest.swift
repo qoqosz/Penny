@@ -63,6 +63,8 @@ enum SelfTest {
         let snap = try call("GET", "\(base)/snapshot", token: token)
         let accounts = snap.json["accounts"] as? [[String: Any]] ?? []
         check(accounts.count == 1, "1 konto")
+        check(accounts.first?["folder"] as? String == "Archiwum" && accounts.first?["folderId"] is String,
+              "folder konta z identyfikatorem")
         check(accounts.first?["balance"] as? String == "90", "saldo 100 - 10 = 90 (jest \(accounts.first?["balance"] ?? "-"))")
         let categories = snap.json["categories"] as? [[String: Any]] ?? []
         let food = categories.first { $0["id"] as? String == ids.food }
@@ -161,7 +163,8 @@ enum SelfTest {
                 return o
             }
             let pln = make("Currency", ["code": "PLN", "defaultCurrency": true])
-            let account = make("Account", ["name": "Konto testowe", "currency": pln])
+            let folder = make("Folder", ["name": "Archiwum"])
+            let account = make("Account", ["name": "Konto testowe", "currency": pln, "folder": folder])
             let food = make("Category", ["name": "Jedzenie", "categoryType": 9999, "defaultTransactionType": 21])
             let salary = make("Category", ["name": "Pensja", "categoryType": 9999, "defaultTransactionType": 11])
             _ = make("Category", ["name": "Balance Adjustment", "categoryType": 30, "defaultTransactionType": -1])

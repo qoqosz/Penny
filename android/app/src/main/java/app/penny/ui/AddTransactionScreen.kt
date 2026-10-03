@@ -60,13 +60,20 @@ import app.penny.R
 import app.penny.data.Category
 import app.penny.data.Kind
 import app.penny.data.Repository
+import kotlinx.coroutines.flow.StateFlow
 import java.time.Instant
 import java.time.ZoneOffset
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, onDone: () -> Unit) {
+fun AddTransactionScreen(
+    repository: Repository,
+    hiddenFolders: StateFlow<Set<String>>,
+    vm: AddTransactionViewModel,
+    onDone: () -> Unit,
+) {
     val app by repository.state.collectAsStateWithLifecycle()
+    val hidden by hiddenFolders.collectAsStateWithLifecycle()
     val form by vm.form.collectAsStateWithLifecycle()
     val snapshot = app.snapshot
     var pickCategory by rememberSaveable { mutableStateOf(false) }
@@ -125,7 +132,8 @@ fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, on
             )
 
             AccountPicker(
-                accounts = snapshot.accounts.filter { !it.closed },
+                // A hidden account stays listed when it's preselected (opened from its own screen).
+                accounts = snapshot.accounts.filter { !it.closed && (!it.isHidden(hidden) || it.id == form.accountId) },
                 selectedId = form.accountId,
                 onSelect = { id -> vm.update { it.copy(accountId = id) } },
             )

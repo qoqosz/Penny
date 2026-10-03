@@ -105,6 +105,7 @@ private fun Screens(app: PennyApplication, nav: NavHostController, startDestinat
             HomeScreen(
                 repository = repository,
                 recent = vm,
+                hiddenFolders = app.preferences.hiddenFolders,
                 onOpenAccount = { nav.navigate(Routes.account(it)) },
                 onAdd = { nav.navigate(Routes.add(null)) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
@@ -129,9 +130,14 @@ private fun Screens(app: PennyApplication, nav: NavHostController, startDestinat
         ) { entry ->
             val accountId = entry.arguments?.getString("accountId")
             val vm: AddTransactionViewModel = viewModel(factory = viewModelFactory {
-                initializer { AddTransactionViewModel(repository, accountId) }
+                initializer { AddTransactionViewModel(repository, app.preferences.hiddenFolders, accountId) }
             })
-            AddTransactionScreen(repository = repository, vm = vm, onDone = { nav.popBackStack() })
+            AddTransactionScreen(
+                repository = repository,
+                hiddenFolders = app.preferences.hiddenFolders,
+                vm = vm,
+                onDone = { nav.popBackStack() },
+            )
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(

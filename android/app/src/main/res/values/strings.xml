@@ -104,6 +104,17 @@
     <string name="language_system">System default</string>
     <string name="language_english" translatable="false">English</string>
     <string name="language_polish" translatable="false">Polski</string>
+    <string name="settings_accounts">Accounts</string>
+    <string name="hidden_folders_summary">Hide checked folders. Their accounts don\'t appear on the main screen, in the totals or when adding a transaction.</string>
+    <string name="hidden_folders_empty">Money folders appear here once accounts have been downloaded from the Mac.</string>
+    <plurals name="account_count">
+        <item quantity="one">%d account</item>
+        <item quantity="other">%d accounts</item>
+    </plurals>
+    <plurals name="accounts_hidden">
+        <item quantity="one">%d account hidden in settings</item>
+        <item quantity="other">%d accounts hidden in settings</item>
+    </plurals>
     <string name="settings_security">Security</string>
     <string name="lock_title">App lock</string>
     <string name="lock_summary">Require a PIN to open Penny</string>

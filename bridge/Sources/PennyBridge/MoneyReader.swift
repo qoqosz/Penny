@@ -8,6 +8,8 @@ struct AccountDTO: Codable {
     let type: Int
     let currency: String
     let folder: String?
+    /// Stable across folder renames (the app hides accounts by folder).
+    let folderId: String?
     let closed: Bool
     let sortOrder: Int
     let balance: String
@@ -262,6 +264,7 @@ enum MoneyReader {
             AccountDTO(
                 id: a.publicID, name: a.string("name") ?? "Konto", type: a.int("accountType"),
                 currency: accountCurrency[a.objectID] ?? "", folder: a.object("folder")?.string("name"),
+                folderId: a.object("folder")?.publicID,
                 closed: a.bool("closed"), sortOrder: a.int("sortOrder"),
                 balance: (balances[a.objectID] ?? 0).plainString, transactionCount: counts[a.objectID] ?? 0,
                 lastTransactionDate: lastDates[a.objectID], hasInvestments: investmentAccounts.contains(a.objectID))

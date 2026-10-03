@@ -30,7 +30,7 @@ class BridgeClientTest {
     @Test fun `parses snapshot as sent by the bridge`() = runTest {
         server.enqueue(MockResponse().setBody("""
             {"generation":"1:2-3:4","bridgeVersion":"1.0.0","writesEnabled":true,"defaultCurrency":"PLN",
-             "accounts":[{"id":"A","name":"Konto","type":2,"currency":"PLN","closed":false,"sortOrder":0,
+             "accounts":[{"id":"A","name":"Konto","type":2,"currency":"PLN","folder":"Archiwum","folderId":"F1","closed":false,"sortOrder":0,
                           "balance":"83.16","transactionCount":4,"lastTransactionDate":"2026-10-02T08:30:00Z","hasInvestments":false}],
              "categories":[{"id":"C","name":"Groceries","fullName":"Food & Dining › Groceries","parentId":"P","kind":"expense","usageCount":3}],
              "payees":[{"id":"P1","name":"Biedronka","usageCount":2}],
@@ -38,6 +38,8 @@ class BridgeClientTest {
         """.trimIndent()))
         val snapshot = client.snapshot(connection)
         assertEquals(BigDecimal("83.16"), snapshot.accounts.single().balanceValue)
+        assertTrue(snapshot.accounts.single().isHidden(setOf("F1")))
+        assertFalse(snapshot.accounts.single().isHidden(setOf("F2")))
         assertEquals("expense", snapshot.categories.single().kind)
         assertNull(snapshot.payees.single().categoryId)
         val request = server.takeRequest()

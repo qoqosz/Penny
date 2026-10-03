@@ -32,6 +32,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -53,6 +54,7 @@ import app.penny.R
 import app.penny.data.Account
 import app.penny.data.Repository
 import app.penny.data.SyncStatus
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
 
@@ -61,11 +63,13 @@ import java.math.BigDecimal
 fun HomeScreen(
     repository: Repository,
     recent: TransactionsViewModel,
+    hiddenFolders: StateFlow<Set<String>>,
     onOpenAccount: (String) -> Unit,
     onAdd: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
+    val hidden by hiddenFolders.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(0) }
     val syncing = app.status == SyncStatus.Syncing
@@ -111,7 +115,7 @@ fun HomeScreen(
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
             when (tab) {
-                0 -> AccountsList(app.snapshot?.accounts, app.status, onOpenAccount)
+                0 -> AccountsList(app.snapshot?.accounts, hidden, app.status, onOpenAccount, onOpenSettings)
                 else -> RecentList(repository, recent)
             }
         }
@@ -119,8 +123,15 @@ fun HomeScreen(
 }
 
 @Composable
-private fun AccountsList(accounts: List<Account>?, status: SyncStatus, onOpen: (String) -> Unit) {
+private fun AccountsList(
+    allAccounts: List<Account>?,
+    hiddenFolders: Set<String>,
+    status: SyncStatus,
+    onOpen: (String) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     var showClosed by rememberSaveable { mutableStateOf(false) }
+    val accounts = allAccounts?.filterNot { it.isHidden(hiddenFolders) }
     if (accounts == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (status == SyncStatus.Syncing) CircularProgressIndicator()
@@ -132,6 +143,7 @@ private fun AccountsList(accounts: List<Account>?, status: SyncStatus, onOpen: (
     val closed = accounts.filter { it.closed }
     val defaultFolder = stringResource(R.string.accounts_default_folder)
     val closedTitle = stringResource(R.string.accounts_closed, closed.size)
+    val hiddenCount = allAccounts.orEmpty().size - accounts.size
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         item(key = "totals") { TotalsCard(open) }
         open.groupBy { it.folder ?: defaultFolder }.forEach { (folder, list) ->
@@ -151,6 +163,13 @@ private fun AccountsList(accounts: List<Account>?, status: SyncStatus, onOpen: (
                 )
             }
             if (showClosed) items(closed, key = { it.id }) { AccountRow(it, onOpen) }
+        }
+        if (hiddenCount > 0) {
+            item(key = "hidden") {
+                TextButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                    Text(pluralStringResource(R.plurals.accounts_hidden, hiddenCount, hiddenCount))
+                }
+            }
         }
     }
 }

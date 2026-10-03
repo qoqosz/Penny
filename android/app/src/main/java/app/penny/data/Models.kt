@@ -13,6 +13,7 @@ data class Account(
     val type: Int,
     val currency: String,
     val folder: String? = null,
+    val folderId: String? = null,
     val closed: Boolean = false,
     val sortOrder: Int = 0,
     val balance: String,
@@ -21,6 +22,9 @@ data class Account(
     val hasInvestments: Boolean = false,
 ) {
     val balanceValue: BigDecimal get() = balance.toBigDecimalOrNull() ?: BigDecimal.ZERO
+
+    /** Accounts in folders the user hid in settings stay out of lists, totals and the account picker. */
+    fun isHidden(hiddenFolders: Set<String>): Boolean = folderId != null && folderId in hiddenFolders
 }
 
 @Serializable

@@ -140,15 +140,20 @@ data class AddForm(
     val parsedAmount: BigDecimal? get() = Format.parseAmount(amount)
 }
 
-class AddTransactionViewModel(private val repository: Repository, initialAccountId: String?) : ViewModel() {
+class AddTransactionViewModel(
+    private val repository: Repository,
+    private val hiddenFolders: StateFlow<Set<String>>,
+    initialAccountId: String?,
+) : ViewModel() {
     private val _form = MutableStateFlow(AddForm(accountId = initialAccountId ?: defaultAccount()))
     val form: StateFlow<AddForm> = _form.asStateFlow()
 
     private fun defaultAccount(): String? {
         val snapshot = repository.state.value.snapshot ?: return null
+        val candidates = snapshot.accounts.filter { !it.closed && !it.isHidden(hiddenFolders.value) }
         val lastUsed = repository.state.value.pending.lastOrNull()?.request?.accountId
-        return lastUsed?.takeIf { id -> snapshot.accounts.any { it.id == id && !it.closed } }
-            ?: snapshot.accounts.filter { !it.closed && !it.hasInvestments }.maxByOrNull { it.transactionCount }?.id
+        return lastUsed?.takeIf { id -> candidates.any { it.id == id } }
+            ?: candidates.filter { !it.hasInvestments }.maxByOrNull { it.transactionCount }?.id
     }
 
     fun update(block: (AddForm) -> AddForm) = _form.update { block(it).copy(error = null) }
