@@ -17,7 +17,7 @@ struct SyncConventions {
     static func learn(syncStore: URL, knownTransactionIDs: [String]) throws -> SyncConventions {
         let db = try SQLiteDB(path: syncStore.path)
         guard try db.tableExists("ZQSSYNCEDENTITY") else {
-            throw BridgeError.setup("Plik \(syncStore.lastPathComponent) nie jest bazą SyncKit.")
+            throw BridgeError.setup("Plik \(syncStore.lastPathComponent) nie jest bazą SyncKit.", en: "\(syncStore.lastPathComponent) is not a SyncKit database.")
         }
         var histogram: [Int: Int] = [:]
         for row in try db.query("SELECT ZSTATE AS s, COUNT(*) AS c FROM ZQSSYNCEDENTITY GROUP BY ZSTATE") {
@@ -43,7 +43,9 @@ struct SyncConventions {
         else {
             throw BridgeError.setup(
                 "Nie rozpoznano formatu identyfikatorów SyncKit (dopasowano \(patterns.values.reduce(0, +)) "
-                    + "z \(min(40, knownTransactionIDs.count)) transakcji). Zapis wyłączony dla bezpieczeństwa.")
+                    + "z \(min(40, knownTransactionIDs.count)) transakcji). Zapis wyłączony dla bezpieczeństwa.",
+                en: "SyncKit identifier format not recognized (matched \(patterns.values.reduce(0, +)) "
+                    + "of \(min(40, knownTransactionIDs.count)) transactions). Writing is disabled for safety.")
         }
         let parts = best.key.components(separatedBy: "\u{0}")
         return SyncConventions(prefix: parts[0], suffix: parts[1], usesOriginObjectID: origin.with > origin.without,

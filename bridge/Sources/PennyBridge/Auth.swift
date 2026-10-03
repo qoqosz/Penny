@@ -36,18 +36,18 @@ enum Auth {
               pairing.attemptsLeft > 0
         else {
             try? FileManager.default.removeItem(at: Paths.pairing)
-            throw BridgeError.unauthorized("Brak aktywnego kodu parowania. Uruchom na Macu: penny-bridge pair")
+            throw BridgeError.unauthorized("Brak aktywnego kodu parowania. Uruchom na Macu: penny-bridge pair", en: "No active pairing code. On the Mac, run: penny-bridge pair")
         }
         guard constantTimeEquals(hash(code.trimmingCharacters(in: .whitespaces)), pairing.codeHash) else {
             pairing.attemptsLeft -= 1
             try? JSONFile.write(pairing, to: Paths.pairing)
-            throw BridgeError.unauthorized("Nieprawidłowy kod parowania (pozostało prób: \(pairing.attemptsLeft)).")
+            throw BridgeError.unauthorized("Nieprawidłowy kod parowania (pozostało prób: \(pairing.attemptsLeft)).", en: "Wrong pairing code (attempts left: \(pairing.attemptsLeft)).")
         }
         try? FileManager.default.removeItem(at: Paths.pairing)
 
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            throw BridgeError.internal("Nie udało się wygenerować tokenu.")
+            throw BridgeError.internal("Nie udało się wygenerować tokenu.", en: "Couldn't generate an access token.")
         }
         let token = Data(bytes).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")

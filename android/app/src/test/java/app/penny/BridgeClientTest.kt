@@ -17,6 +17,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.math.BigDecimal
+import java.util.Locale
 
 class BridgeClientTest {
     private lateinit var server: MockWebServer
@@ -54,6 +55,20 @@ class BridgeClientTest {
         val body = server.takeRequest().body.readUtf8()
         assertTrue(body.contains("\"amount\":\"12.5\""))
         assertFalse("nulls are omitted", body.contains("categoryId"))
+    }
+
+    @Test fun `asks for messages in the app language`() = runTest {
+        val previous = Locale.getDefault()
+        try {
+            for (locale in listOf(Locale.US, Locale.forLanguageTag("pl-PL"))) {
+                Locale.setDefault(locale)
+                server.enqueue(MockResponse().setBody("""{"app":"penny-bridge","name":"Mac","version":"1.0.0"}"""))
+                client.ping(server.hostName, server.port)
+                assertEquals(locale.toLanguageTag(), server.takeRequest().getHeader("Accept-Language"))
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
     }
 
     @Test fun `busy Mac is retried, not rejected`() {

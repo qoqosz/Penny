@@ -40,14 +40,15 @@ final class API {
     }
 
     func handle(_ request: HTTPRequest) -> HTTPResponse {
+        let language = Language(acceptLanguage: request.header("accept-language"))
         do {
             return try route(request)
         } catch let error as BridgeError {
             if error.status >= 500 { Log.error(error.message) }
-            return .error(error)
+            return .error(error, in: language)
         } catch {
             Log.error("\(error)")
-            return .error(.internal(error.localizedDescription))
+            return .error(.internal(error.localizedDescription), in: language)
         }
     }
 
@@ -55,13 +56,13 @@ final class API {
         switch (request.method, request.path) {
         case ("GET", "/api/v1/ping"):
             struct Ping: Encodable { let app = "penny-bridge"; let name: String; let version: String }
-            return .json(Ping(name: serviceName, version: bridgeVersion))
+            return try .json(Ping(name: serviceName, version: bridgeVersion))
         case ("POST", "/api/v1/pair"):
             struct PairRequest: Decodable { let code: String; let deviceName: String }
             struct PairResponse: Encodable { let token: String; let name: String }
             let body = try decode(PairRequest.self, request.body)
             let token = try Auth.completePairing(code: body.code, deviceName: body.deviceName)
-            return .json(PairResponse(token: token, name: serviceName))
+            return try .json(PairResponse(token: token, name: serviceName))
         default:
             break
         }
@@ -72,9 +73,9 @@ final class API {
 
         switch (request.method, request.path) {
         case ("GET", "/api/v1/status"):
-            return .json(try status())
+            return try .json(try status())
         case ("GET", "/api/v1/snapshot"):
-            return .json(try currentSnapshot().dto(writesEnabled: config.writesEnabled))
+            return try .json(try currentSnapshot().dto(writesEnabled: config.writesEnabled))
         case ("GET", "/api/v1/transactions"):
             let snapshot = try currentSnapshot()
             var items = snapshot.transactions
@@ -82,17 +83,17 @@ final class API {
             let offset = max(0, Int(request.query["offset"] ?? "") ?? 0)
             let limit = min(1000, max(1, Int(request.query["limit"] ?? "") ?? 200))
             let page = Array(items.dropFirst(offset).prefix(limit))
-            return .json(TransactionPageDTO(generation: snapshot.generation, total: items.count, offset: offset, items: page))
+            return try .json(TransactionPageDTO(generation: snapshot.generation, total: items.count, offset: offset, items: page))
         case ("POST", "/api/v1/transactions"):
             let body = try decode(NewTransactionRequest.self, request.body)
             let id = try createTransaction(body)
             let snapshot = try currentSnapshot()
             guard let created = snapshot.transactions.first(where: { $0.id == id }) else {
-                throw BridgeError.internal("Transakcja zapisana, ale nie widać jej w bazie (\(id)).")
+                throw BridgeError.internal("Transakcja zapisana, ale nie widać jej w bazie (\(id)).", en: "The transaction was saved but doesn't show up in the database (\(id)).")
             }
-            return .json(created, status: 201)
+            return try .json(created, status: 201)
         default:
-            throw BridgeError.notFound("Nieznany adres \(request.method) \(request.path)")
+            throw BridgeError.notFound("Nieznany adres \(request.method) \(request.path)", en: "Unknown endpoint \(request.method) \(request.path)")
         }
     }
 
@@ -100,7 +101,7 @@ final class API {
         do {
             return try Self.decoder.decode(type, from: data)
         } catch {
-            throw BridgeError.badRequest("Nieprawidłowe dane: \(error)")
+            throw BridgeError.badRequest("Nieprawidłowe dane: \(error)", en: "Invalid data: \(error)")
         }
     }
 

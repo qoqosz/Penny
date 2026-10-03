@@ -27,6 +27,16 @@ enum SelfTest {
             syncStoreURL: tmp.appendingPathComponent("QSSyncStore.sqlite"))
         let ids = try seed(location)
 
+        print("Język komunikatów")
+        let languages: [(String?, Language)] = [
+            (nil, .polish), ("", .polish), ("pl-PL", .polish), ("en-US", .english), ("de-DE", .english),
+            ("pl-PL,en;q=0.8", .polish), ("en-US,pl;q=0.9", .english), ("de-DE,pl;q=0.9,en;q=0.8", .polish),
+            ("en;q=0.5, pl;q=0.9", .polish), ("pl;q=0,en", .english),
+        ]
+        for (header, expected) in languages {
+            check(Language(acceptLanguage: header) == expected, "Accept-Language \(header.map { "„\($0)”" } ?? "brak") → \(expected)")
+        }
+
         print("Serwer HTTP")
         let api = API(config: config, serviceName: "selftest", location: location, controlsMoneyApp: false)
         let server = try HTTPServer(port: 0, serviceName: nil, handler: api.handle)
@@ -36,7 +46,11 @@ enum SelfTest {
 
         let ping = try call("GET", "\(base)/ping")
         check(ping.status == 200, "ping bez autoryzacji")
-        check(try call("GET", "\(base)/snapshot").status == 401, "snapshot bez tokenu → 401")
+        let unauthorized = try call("GET", "\(base)/snapshot")
+        check(unauthorized.status == 401, "snapshot bez tokenu → 401")
+        check(unauthorized.errorMessage == "Brak autoryzacji. Sparuj urządzenie ponownie.", "komunikat po polsku bez nagłówka")
+        let unauthorizedEN = try call("GET", "\(base)/snapshot", language: "en-US")
+        check(unauthorizedEN.errorMessage == "Not authorized. Pair the device again.", "komunikat po angielsku dla en-US")
 
         let code = try Auth.startPairing()
         check(try call("POST", "\(base)/pair", body: ["code": "abcdef", "deviceName": "x"]).status == 401,
@@ -84,6 +98,12 @@ enum SelfTest {
             "kind": "expense", "amount": "-3",
         ])
         check(bad.status == 422, "ujemna kwota odrzucona")
+        check(bad.errorMessage == "Nieprawidłowa kwota: -3", "powód odrzucenia po polsku (\(bad.errorMessage ?? "-"))")
+        let badEN = try call("POST", "\(base)/transactions", token: token, language: "en-US,en;q=0.9", body: [
+            "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-02T08:30:00Z",
+            "kind": "expense", "amount": "-3",
+        ])
+        check(badEN.errorMessage == "Invalid amount: -3", "powód odrzucenia po angielsku (\(badEN.errorMessage ?? "-"))")
 
         let page = try call("GET", "\(base)/transactions?accountId=\(ids.account)&limit=2", token: token)
         check(page.json["total"] as? Int == 4, "4 transakcje na koncie")
@@ -182,12 +202,15 @@ enum SelfTest {
         var json: [String: Any] {
             (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
         }
+        var errorMessage: String? { (json["error"] as? [String: Any])?["message"] as? String }
     }
 
-    private static func call(_ method: String, _ url: String, token: String? = nil,
+    private static func call(_ method: String, _ url: String, token: String? = nil, language: String? = nil,
                              body: [String: Any]? = nil) throws -> Response {
         var request = URLRequest(url: URL(string: url)!)
         request.httpMethod = method
+        // URLSession adds the system's Accept-Language unless one is set; an empty value stands for "no header".
+        request.setValue(language ?? "", forHTTPHeaderField: "Accept-Language")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)

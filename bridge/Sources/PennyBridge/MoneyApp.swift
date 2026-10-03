@@ -24,7 +24,9 @@ final class MoneyAppController {
             if Date() > deadline {
                 throw BridgeError.busy(
                     "Money nie zamknął się w ciągu \(Int(timeout)) s (może ma otwarte okno edycji lub hasło). "
-                        + "Transakcja poczeka i zostanie wysłana ponownie.")
+                        + "Transakcja poczeka i zostanie wysłana ponownie.",
+                    en: "Money didn't quit within \(Int(timeout)) s (it may have an edit window open or be asking for a password). "
+                        + "The transaction will wait and be sent again.")
             }
             Thread.sleep(forTimeInterval: 0.2)
         }

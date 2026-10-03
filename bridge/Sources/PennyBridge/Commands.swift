@@ -166,7 +166,7 @@ enum Commands {
 
     static func install() throws {
         guard let source = Bundle.main.executableURL?.resolvingSymlinksInPath() else {
-            throw BridgeError.internal("Nie można ustalić ścieżki programu.")
+            throw BridgeError.internal("Nie można ustalić ścieżki programu.", en: "Can't determine the program path.")
         }
         let fm = FileManager.default
         let target = Paths.installedBinary
@@ -194,7 +194,7 @@ enum Commands {
         let domain = "gui/\(getuid())"
         _ = launchctl(["bootout", "\(domain)/\(Paths.launchAgentLabel)"])
         guard launchctl(["bootstrap", domain, Paths.launchAgent.path]) == 0 else {
-            throw BridgeError.internal("launchctl bootstrap nie powiódł się.")
+            throw BridgeError.internal("launchctl bootstrap nie powiódł się.", en: "launchctl bootstrap failed.")
         }
         print("""
         ✓ Zainstalowano usługę \(Paths.launchAgentLabel)

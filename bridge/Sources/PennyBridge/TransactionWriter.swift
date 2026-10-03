@@ -44,9 +44,9 @@ final class TransactionWriter {
             Log.info("Transakcja \(request.clientId) już zapisana jako \(existing.transactionId)")
             return existing.transactionId
         }
-        guard config.writesEnabled else { throw BridgeError.invalid("Zapis jest wyłączony w konfiguracji mostu.") }
+        guard config.writesEnabled else { throw BridgeError.invalid("Zapis jest wyłączony w konfiguracji mostu.", en: "Writing is turned off in the bridge configuration.") }
         guard let syncStore = location.syncStoreURL else {
-            throw BridgeError.setup("Nie znaleziono bazy synchronizacji Money (SyncKit). Czy synchronizacja z iCloud jest włączona?")
+            throw BridgeError.setup("Nie znaleziono bazy synchronizacji Money (SyncKit). Czy synchronizacja z iCloud jest włączona?", en: "Money's sync database (SyncKit) not found. Is iCloud sync turned on?")
         }
 
         let plan = try validate(request, snapshot: snapshot)
@@ -54,7 +54,7 @@ final class TransactionWriter {
             syncStore: syncStore, knownTransactionIDs: snapshot.transactions.prefix(200).map(\.id))
 
         if let app, config.deferWhileMoneyActive, app.isFrontmost {
-            throw BridgeError.busy("Money jest właśnie używany na Macu. Transakcja zostanie wysłana później.")
+            throw BridgeError.busy("Money jest właśnie używany na Macu. Transakcja zostanie wysłana później.", en: "Money is in use on the Mac right now. The transaction will be sent later.")
         }
         let wasRunning = try app?.quit(timeout: config.quitTimeoutSeconds) ?? false
         defer {
@@ -62,7 +62,7 @@ final class TransactionWriter {
         }
         // Money may have saved something while quitting; anything we validated against must still hold.
         guard MoneyLocator.generation(of: location.storeURL) == snapshot.generation || wasRunning else {
-            throw BridgeError.busy("Dane Money zmieniły się w trakcie zapisu. Spróbuj ponownie.")
+            throw BridgeError.busy("Dane Money zmieniły się w trakcie zapisu. Spróbuj ponownie.", en: "Money's data changed during the write. Try again.")
         }
 
         let stores = [location.storeURL, syncStore]
@@ -98,31 +98,32 @@ final class TransactionWriter {
 
     private func validate(_ r: NewTransactionRequest, snapshot: MoneySnapshot) throws -> Plan {
         guard let kind = Kind(rawValue: r.kind), kind == .expense || kind == .income else {
-            throw BridgeError.invalid("Nieobsługiwany rodzaj transakcji: \(r.kind)")
+            throw BridgeError.invalid("Nieobsługiwany rodzaj transakcji: \(r.kind)", en: "Unsupported transaction kind: \(r.kind)")
         }
         guard let amount = Decimal.parse(r.amount), amount > 0, amount < 1_000_000_000 else {
-            throw BridgeError.invalid("Nieprawidłowa kwota: \(r.amount)")
+            throw BridgeError.invalid("Nieprawidłowa kwota: \(r.amount)", en: "Invalid amount: \(r.amount)")
         }
-        guard let account = snapshot.account(r.accountId) else { throw BridgeError.invalid("Nie ma takiego konta.") }
-        guard !account.closed else { throw BridgeError.invalid("Konto „\(account.name)” jest zamknięte.") }
+        guard let account = snapshot.account(r.accountId) else { throw BridgeError.invalid("Nie ma takiego konta.", en: "No such account.") }
+        guard !account.closed else { throw BridgeError.invalid("Konto „\(account.name)” jest zamknięte.", en: "The account “\(account.name)” is closed.") }
         var category: CategoryDTO?
         if let id = r.categoryId {
             guard let c = snapshot.category(id), c.kind == Kind.expense.rawValue || c.kind == Kind.income.rawValue else {
-                throw BridgeError.invalid("Nie ma takiej kategorii.")
+                throw BridgeError.invalid("Nie ma takiej kategorii.", en: "No such category.")
             }
             category = c
         }
         let payee = r.payeeName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let note = r.note?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (payee?.count ?? 0) <= 200, (note?.count ?? 0) <= 2000 else {
-            throw BridgeError.invalid("Za długi odbiorca lub notatka.")
+            throw BridgeError.invalid("Za długi odbiorca lub notatka.", en: "The payee or note is too long.")
         }
 
         // Prefer the same category with the same sign, then anything of the same kind.
         let byCategory = category.flatMap { snapshot.templatesByCategory[$0.id] }.flatMap { $0.kind == kind ? $0 : nil }
         guard let template = byCategory ?? snapshot.templatesByKind[kind] else {
             throw BridgeError.invalid(
-                "Brak wzorcowej transakcji typu „\(kind.rawValue)” w Money — dodaj jedną ręcznie na Macu.")
+                "Brak wzorcowej transakcji typu „\(kind.rawValue)” w Money — dodaj jedną ręcznie na Macu.",
+                en: "Money has no template transaction of kind “\(kind.rawValue)”. Add one by hand on the Mac.")
         }
         return Plan(request: r, account: account, category: category, template: template,
                     signedAmount: kind == .expense ? -amount : amount,
@@ -139,7 +140,7 @@ final class TransactionWriter {
                     return try ctx.existingObject(with: oid)
                 }
                 guard let object = try ctx.fetchFirst(entity, NSPredicate(format: "uniqueIdentifier == %@", id)) else {
-                    throw BridgeError.invalid("Nie znaleziono obiektu \(entity) \(id).")
+                    throw BridgeError.invalid("Nie znaleziono obiektu \(entity) \(id).", en: "Object \(entity) \(id) not found.")
                 }
                 return object
             }

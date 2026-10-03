@@ -14,7 +14,7 @@ final class SQLiteDB {
             let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
             sqlite3_close(db)
             db = nil
-            throw BridgeError.internal("Nie można otworzyć \(path): \(message)")
+            throw BridgeError.internal("Nie można otworzyć \(path): \(message)", en: "Can't open \(path): \(message)")
         }
         sqlite3_busy_timeout(db, 5000)
         _ = try query("PRAGMA query_only = 1")
@@ -25,7 +25,7 @@ final class SQLiteDB {
     func query(_ sql: String, _ args: [String] = []) throws -> [[String: Any]] {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw BridgeError.internal("SQL: \(String(cString: sqlite3_errmsg(db))) w \(sql)")
+            throw BridgeError.internal("SQL: \(String(cString: sqlite3_errmsg(db))) w \(sql)", en: "SQL: \(String(cString: sqlite3_errmsg(db))) in \(sql)")
         }
         defer { sqlite3_finalize(stmt) }
         for (i, arg) in args.enumerated() {

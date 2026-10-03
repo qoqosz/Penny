@@ -17,7 +17,7 @@ enum ModelLoader {
     static func load(_ url: URL) throws -> NSManagedObjectModel {
         // Models loaded from disk can be shared and immutable; a copy is always editable.
         guard let loaded = NSManagedObjectModel(contentsOf: url), let model = loaded.copy() as? NSManagedObjectModel else {
-            throw BridgeError.setup("Nie można wczytać modelu danych \(url.path).")
+            throw BridgeError.setup("Nie można wczytać modelu danych \(url.path).", en: "Can't load the data model \(url.path).")
         }
         ValueTransformer.setValueTransformer(PassthroughTransformer(), forName: PassthroughTransformer.name)
         for entity in model.entities {
@@ -41,12 +41,14 @@ final class CoreDataStore {
             metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
                 ofType: NSSQLiteStoreType, at: url, options: nil)
         } catch {
-            throw BridgeError.setup("Nie można odczytać bazy \(url.lastPathComponent): \(error.localizedDescription)")
+            throw BridgeError.setup("Nie można odczytać bazy \(url.lastPathComponent): \(error.localizedDescription)", en: "Can't read the database \(url.lastPathComponent): \(error.localizedDescription)")
         }
         guard model.isConfiguration(withName: nil, compatibleWithStoreMetadata: metadata) else {
             throw BridgeError.setup(
                 "Baza \(url.lastPathComponent) ma inny format niż model z Money.app. "
-                    + "Uruchom Money, żeby dokończył aktualizację danych, i spróbuj ponownie.")
+                    + "Uruchom Money, żeby dokończył aktualizację danych, i spróbuj ponownie.",
+                en: "The database \(url.lastPathComponent) has a different format than the model in Money.app. "
+                    + "Open Money so it can finish updating its data, then try again.")
         }
         coordinator = NSPersistentStoreCoordinator(managedObjectModel: model)
         var options: [String: Any] = [

@@ -13,7 +13,7 @@ enum MoneyLocator {
     static func locate(_ config: BridgeConfig) throws -> MoneyLocation {
         let app = URL(fileURLWithPath: config.moneyAppPath)
         guard FileManager.default.fileExists(atPath: app.path) else {
-            throw BridgeError.setup("Nie znaleziono Money.app w \(app.path).")
+            throw BridgeError.setup("Nie znaleziono Money.app w \(app.path).", en: "Money.app not found at \(app.path).")
         }
         let model = try findResource(named: "Money.momd", in: app)
         let syncModel = try findResource(named: "QSCloudKitSyncModel.momd", in: app)
@@ -46,7 +46,7 @@ enum MoneyLocator {
             }
         }
         guard let best = found.min(by: { $0.path.count < $1.path.count }) else {
-            throw BridgeError.setup("Nie znaleziono \(name) w \(app.path). Nieobsługiwana wersja Money?")
+            throw BridgeError.setup("Nie znaleziono \(name) w \(app.path). Nieobsługiwana wersja Money?", en: "\(name) not found in \(app.path). Unsupported Money version?")
         }
         return best
     }
@@ -61,7 +61,9 @@ enum MoneyLocator {
                 let binary = Bundle.main.executableURL?.path ?? CommandLine.arguments[0]
                 throw BridgeError.setup(
                     "Brak dostępu do danych Money. Nadaj „Pełny dostęp do dysku” programowi \(binary) "
-                        + "(Ustawienia systemowe → Prywatność i ochrona) i uruchom most ponownie.")
+                        + "(Ustawienia systemowe → Prywatność i ochrona) i uruchom most ponownie.",
+                    en: "No access to Money's data. Grant “Full Disk Access” to \(binary) "
+                        + "(System Settings → Privacy & Security) and restart the bridge.")
             }
         }
     }
@@ -92,7 +94,7 @@ enum MoneyLocator {
             $0.lastPathComponent == "Money.sqlite" && !$0.path.localizedCaseInsensitiveContains("backup")
         }
         guard let best = candidates.max(by: { lastModified($0) < lastModified($1) }) else {
-            throw BridgeError.setup("Nie znaleziono bazy Money (Money.sqlite). Czy Money był uruchomiony na tym Macu?")
+            throw BridgeError.setup("Nie znaleziono bazy Money (Money.sqlite). Czy Money był uruchomiony na tym Macu?", en: "Money's database (Money.sqlite) not found. Has Money been opened on this Mac?")
         }
         if candidates.count > 1 {
             Log.info("Znaleziono \(candidates.count) baz Money, wybieram najnowszą: \(best.path)")

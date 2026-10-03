@@ -51,18 +51,19 @@ struct HTTPResponse {
     var body: Data
     var contentType = "application/json; charset=utf-8"
 
-    static func json<T: Encodable>(_ value: T, status: Int = 200) -> HTTPResponse {
+    static func json<T: Encodable>(_ value: T, status: Int = 200) throws -> HTTPResponse {
         do {
             return HTTPResponse(status: status, body: try API.encoder.encode(value))
         } catch {
-            return .error(.internal("Błąd kodowania odpowiedzi: \(error)"))
+            throw BridgeError.internal("Błąd kodowania odpowiedzi: \(error)", en: "Couldn't encode the response: \(error)")
         }
     }
 
-    static func error(_ e: BridgeError) -> HTTPResponse {
+    static func error(_ e: BridgeError, in language: Language) -> HTTPResponse {
         struct Body: Encodable { let error: Inner }
         struct Inner: Encodable { let code: String; let message: String }
-        let body = (try? API.encoder.encode(Body(error: Inner(code: e.code, message: e.message)))) ?? Data()
+        let inner = Inner(code: e.code, message: e.message(in: language))
+        let body = (try? API.encoder.encode(Body(error: inner))) ?? Data()
         return HTTPResponse(status: e.status, body: body)
     }
 
@@ -121,9 +122,9 @@ final class HTTPServer {
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
         listener.start(queue: ioQueue)
         if ready.wait(timeout: .now() + 10) == .timedOut {
-            throw BridgeError.internal("Serwer HTTP nie wystartował w ciągu 10 s.")
+            throw BridgeError.internal("Serwer HTTP nie wystartował w ciągu 10 s.", en: "The HTTP server didn't start within 10 s.")
         }
-        if let failure { throw BridgeError.internal("Serwer HTTP: \(failure)") }
+        if let failure { throw BridgeError.internal("Serwer HTTP: \(failure)", en: "HTTP server: \(failure)") }
     }
 
     func stop() { listener.cancel() }
@@ -147,7 +148,9 @@ final class HTTPServer {
                     self.send(response, on: connection)
                 }
             case .invalid:
-                self.send(.error(.badRequest("Nieprawidłowe żądanie HTTP.")), on: connection)
+                // Unparseable, so there's no Accept-Language to go by.
+                let error = BridgeError.badRequest("Nieprawidłowe żądanie HTTP.", en: "Invalid HTTP request.")
+                self.send(.error(error, in: .polish), on: connection)
             case .incomplete:
                 if isComplete || error != nil {
                     connection.cancel()

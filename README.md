@@ -90,7 +90,6 @@ Configuration: `~/Library/Application Support/PennyBridge/config.json`, includin
 - Only expenses and income with a single category are supported. Transfers between accounts, split transactions
   and editing existing transactions don't work yet.
 - The balance of investment accounts is the cash balance only, without the value of securities.
-- Error messages coming from the bridge (e.g. a rejected transaction) are in Polish, whatever the app language.
 - Money's data format isn't documented. The bridge checks that the model matches the installed Money version and refuses
   to write if it doesn't recognize the format. After updating Money, it's worth running `penny-bridge doctor`.
 

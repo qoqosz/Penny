@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /** The bridge answered with an error. [status] 4xx other than 409 means retrying won't help. */
@@ -62,6 +63,8 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
     private suspend inline fun <reified T> call(url: HttpUrl, token: String?, body: String?): T =
         withContext(Dispatchers.IO) {
             val request = Request.Builder().url(url).apply {
+                // The bridge writes its error messages in this language. The default locale follows Penny's language setting.
+                header("Accept-Language", Locale.getDefault().toLanguageTag())
                 if (token != null) header("Authorization", "Bearer $token")
                 if (body != null) post(body.toRequestBody(jsonType))
             }.build()

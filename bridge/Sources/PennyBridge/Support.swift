@@ -22,23 +22,59 @@ enum Log {
     }
 }
 
-/// Error carrying an HTTP status and a user-facing (Polish) message that the Android app shows as-is.
+/// Language of the messages the API sends back.
+enum Language: Equatable {
+    case polish, english
+
+    /// Picks the most preferred of Polish and English from an `Accept-Language` header, English for any other language.
+    /// No header means Polish: app versions from before localization don't send one and only speak Polish.
+    init(acceptLanguage header: String?) {
+        guard let header, !header.trimmingCharacters(in: .whitespaces).isEmpty else {
+            self = .polish
+            return
+        }
+        let ranked = header.split(separator: ",").enumerated().compactMap { index, item -> (tag: String, q: Double, index: Int)? in
+            let parts = item.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let tag = parts.first?.lowercased(), !tag.isEmpty else { return nil }
+            let q = parts.dropFirst().first { $0.hasPrefix("q=") }.flatMap { Double($0.dropFirst(2)) } ?? 1
+            return (tag, q, index)
+        }.filter { $0.q > 0 }.sorted { $0.q != $1.q ? $0.q > $1.q : $0.index < $1.index }
+        let primary = ranked.lazy.map { $0.tag.split(separator: "-").first.map(String.init) ?? $0.tag }
+        self = primary.first { $0 == "pl" || $0 == "en" } == "pl" ? .polish : .english
+    }
+}
+
+/// Error carrying an HTTP status and a user-facing message that the Android app shows as-is, in Polish (CLI, log)
+/// and English (API clients that ask for it).
 struct BridgeError: Error, CustomStringConvertible {
     let status: Int
     let code: String
     let message: String
+    let englishMessage: String
 
     var description: String { message }
 
-    static func badRequest(_ m: String) -> BridgeError { .init(status: 400, code: "bad_request", message: m) }
-    static func unauthorized(_ m: String = "Brak autoryzacji. Sparuj urządzenie ponownie.") -> BridgeError {
-        .init(status: 401, code: "unauthorized", message: m)
+    func message(in language: Language) -> String { language == .polish ? message : englishMessage }
+
+    static func badRequest(_ pl: String, en: String) -> BridgeError { .init(status: 400, code: "bad_request", pl, en) }
+    static func unauthorized(
+        _ pl: String = "Brak autoryzacji. Sparuj urządzenie ponownie.",
+        en: String = "Not authorized. Pair the device again."
+    ) -> BridgeError { .init(status: 401, code: "unauthorized", pl, en) }
+    static func notFound(_ pl: String, en: String) -> BridgeError { .init(status: 404, code: "not_found", pl, en) }
+    static func busy(_ pl: String, en: String) -> BridgeError { .init(status: 409, code: "busy", pl, en) }
+    static func invalid(_ pl: String, en: String) -> BridgeError { .init(status: 422, code: "invalid", pl, en) }
+    static func setup(_ pl: String, en: String) -> BridgeError { .init(status: 503, code: "setup", pl, en) }
+    static func `internal`(_ pl: String, en: String) -> BridgeError { .init(status: 500, code: "internal", pl, en) }
+    /// For text that isn't ours to translate, e.g. a system error description.
+    static func `internal`(_ text: String) -> BridgeError { .init(status: 500, code: "internal", text, text) }
+
+    private init(status: Int, code: String, _ pl: String, _ en: String) {
+        self.status = status
+        self.code = code
+        self.message = pl
+        self.englishMessage = en
     }
-    static func notFound(_ m: String) -> BridgeError { .init(status: 404, code: "not_found", message: m) }
-    static func busy(_ m: String) -> BridgeError { .init(status: 409, code: "busy", message: m) }
-    static func invalid(_ m: String) -> BridgeError { .init(status: 422, code: "invalid", message: m) }
-    static func setup(_ m: String) -> BridgeError { .init(status: 503, code: "setup", message: m) }
-    static func `internal`(_ m: String) -> BridgeError { .init(status: 500, code: "internal", message: m) }
 }
 
 enum Paths {
