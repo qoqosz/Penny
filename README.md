@@ -125,6 +125,10 @@ Transactions added from the phone are written to the demo database.
 - `android/`: Kotlin, Jetpack Compose, Material 3, OkHttp, kotlinx.serialization, WorkManager, AppCompat (per-app
   language and theme), androidx.biometric.
 
+## AI Disclaimer
+
+Yes, the whole work was done with AI help.
+
 ## Author
 
 Łukasz Bednarski
