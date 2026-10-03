@@ -66,7 +66,7 @@ class Settings(private val context: Context) {
     }
 }
 
-/** Small JSON files in app storage: last snapshot, first pages of transactions, pending queue. */
+/** JSON files in app storage: last snapshot, offline copy of transactions, pending queue. */
 class JsonStore(private val dir: File) {
     private val mutex = Mutex()
 
@@ -85,6 +85,10 @@ class JsonStore(private val dir: File) {
             tmp.writeText(BridgeClient.json.encodeToString(serializer, value))
             tmp.renameTo(File(dir, name))
         }
+    }
+
+    suspend fun delete(name: String) = withContext(Dispatchers.IO) {
+        mutex.withLock { File(dir, name).delete() }
     }
 
     suspend fun clear() = withContext(Dispatchers.IO) {
