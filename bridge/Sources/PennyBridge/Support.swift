@@ -119,6 +119,8 @@ struct BridgeConfig: Codable {
     var launchMoneyAfterWrite: Bool = true
     /// Quit/relaunch Money around writes. Only disable when pointing the bridge at a copy of the data.
     var controlMoneyApp: Bool = true
+    /// Don't quit Money while it's the frontmost app (someone is using it); the phone retries later.
+    var deferWhileMoneyActive: Bool = true
     var quitTimeoutSeconds: Double = 30
     var backupsToKeep: Int = 30
     /// SyncKit `SyncedEntityState.new`.
@@ -137,6 +139,7 @@ struct BridgeConfig: Codable {
         writesEnabled = try c.decodeIfPresent(Bool.self, forKey: .writesEnabled) ?? d.writesEnabled
         launchMoneyAfterWrite = try c.decodeIfPresent(Bool.self, forKey: .launchMoneyAfterWrite) ?? d.launchMoneyAfterWrite
         controlMoneyApp = try c.decodeIfPresent(Bool.self, forKey: .controlMoneyApp) ?? d.controlMoneyApp
+        deferWhileMoneyActive = try c.decodeIfPresent(Bool.self, forKey: .deferWhileMoneyActive) ?? d.deferWhileMoneyActive
         quitTimeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .quitTimeoutSeconds) ?? d.quitTimeoutSeconds
         backupsToKeep = try c.decodeIfPresent(Int.self, forKey: .backupsToKeep) ?? d.backupsToKeep
         syncNewState = try c.decodeIfPresent(Int.self, forKey: .syncNewState) ?? d.syncNewState

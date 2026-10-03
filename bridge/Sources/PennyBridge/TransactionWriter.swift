@@ -53,6 +53,9 @@ final class TransactionWriter {
         let conventions = try SyncConventions.learn(
             syncStore: syncStore, knownTransactionIDs: snapshot.transactions.prefix(200).map(\.id))
 
+        if let app, config.deferWhileMoneyActive, app.isFrontmost {
+            throw BridgeError.busy("Money jest właśnie używany na Macu. Transakcja zostanie wysłana później.")
+        }
         let wasRunning = try app?.quit(timeout: config.quitTimeoutSeconds) ?? false
         defer {
             if let app, wasRunning || config.launchMoneyAfterWrite { app.launchInBackground() }

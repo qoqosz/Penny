@@ -10,6 +10,8 @@ final class MoneyAppController {
 
     var isRunning: Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).isEmpty }
 
+    var isFrontmost: Bool { NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.bundleID }
+
     /// Asks Money to quit and waits until the process is gone. Returns whether it was running.
     func quit(timeout: TimeInterval) throws -> Bool {
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)

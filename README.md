@@ -71,7 +71,9 @@ Konfiguracja: `~/Library/Application Support/PennyBridge/config.json`, m.in. `po
 
 - Mac musi być włączony i w tej samej sieci, żeby telefon pobrał świeże dane lub wysłał transakcje.
 - Ruch w sieci lokalnej jest nieszyfrowany (HTTP + token). Używaj w zaufanej sieci domowej.
-- Zapis zamyka Money na kilka sekund. Jeśli w Money jest otwarte okno edycji, zapis poczeka na następną próbę.
+- Zapis zamyka Money na kilka sekund. Gdy Money jest na pierwszym planie (właśnie go używasz) albo ma otwarte
+  okno edycji, most odkłada zapis, a telefon ponawia wysyłkę później. Można to wyłączyć opcją
+  `deferWhileMoneyActive: false`.
 - Obsługiwane są wydatki i przychody z jedną kategorią. Przelewy między kontami, transakcje dzielone
   i edycja istniejących transakcji jeszcze nie działają.
 - Saldo kont inwestycyjnych to tylko saldo gotówkowe, bez wycenianych papierów.
