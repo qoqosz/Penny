@@ -76,7 +76,8 @@ class TransactionsViewModel(private val repository: Repository, private val acco
                 val page = repository.transactions(accountId, offset)
                 _state.update {
                     it.copy(
-                        items = if (offset == 0) page.items else it.items + page.items,
+                        // Pages can come from different sources (Mac, offline copy), so drop repeats; list keys must be unique.
+                        items = if (offset == 0) page.items else (it.items + page.items).distinctBy { t -> t.id },
                         total = page.total, loading = false,
                     )
                 }

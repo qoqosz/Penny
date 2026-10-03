@@ -39,6 +39,7 @@ class Repository(
     private val _state = MutableStateFlow(AppState())
     val state: StateFlow<AppState> = _state.asStateFlow()
     private val syncMutex = Mutex()
+    private val offline = OfflineTransactions(client, cache)
 
     init {
         scope.launch {
@@ -51,6 +52,7 @@ class Repository(
         val response = client.pair(bridge.host, bridge.port, code.filter(Char::isDigit), deviceName)
         settings.save(PairedBridge(response.name, bridge.host, bridge.port, response.token))
         cache.clear()
+        offline.clear()
         _state.update { it.copy(snapshot = null) }
         refresh()
     }
@@ -63,10 +65,11 @@ class Repository(
     suspend fun unpair() {
         settings.clear()
         cache.clear()
+        offline.clear()
         _state.update { AppState(pending = it.pending) }
     }
 
-    /** Sends queued transactions, then reloads accounts and categories. */
+    /** Sends queued transactions, then reloads accounts and categories and the offline copy of transactions. */
     suspend fun refresh() = syncMutex.withLock {
         val bridge = settings.current() ?: return@withLock
         _state.update { it.copy(status = SyncStatus.Syncing) }
@@ -76,6 +79,7 @@ class Repository(
             val changed = snapshot.generation != _state.value.snapshot?.generation
             cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
             _state.update { it.copy(snapshot = snapshot, dataVersion = it.dataVersion + if (changed) 1 else 0) }
+            offline.update(connection, snapshot.generation)
             if (_state.value.pending.any { it.rejectedReason == null }) scheduleSync()
             SyncStatus.Idle
         } catch (e: UnreachableException) {
@@ -114,15 +118,18 @@ class Repository(
         scope.launch { refresh() }
     }
 
+    /**
+     * Pages from the offline copy when it matches the shown snapshot, otherwise from the Mac.
+     * Without the Mac, an older offline copy is better than nothing.
+     */
     suspend fun transactions(accountId: String?, offset: Int, limit: Int = PAGE_SIZE): TransactionPage {
-        val file = "tx_${accountId ?: "all"}.json"
+        val local = offline.current()
+        if (local != null && local.generation == _state.value.snapshot?.generation) return local.page(accountId, offset, limit)
         val bridge = settings.current() ?: throw NotPairedException()
         return try {
-            val page = withReconnect(bridge) { client.transactions(it, accountId, offset, limit) }
-            if (offset == 0) cache.write(file, TransactionPage.serializer(), page)
-            page
+            withReconnect(bridge) { client.transactions(it, accountId, offset, limit) }
         } catch (e: UnreachableException) {
-            if (offset == 0) cache.read(file, TransactionPage.serializer()) ?: throw e else throw e
+            local?.page(accountId, offset, limit) ?: throw e
         }
     }
 
