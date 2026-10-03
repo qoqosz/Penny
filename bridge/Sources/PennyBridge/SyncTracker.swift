@@ -54,7 +54,6 @@ struct SyncConventions {
 struct InsertedObject {
     let entity: String
     let uniqueID: String
-    let objectURI: String
 }
 
 enum SyncTracker {
@@ -77,7 +76,8 @@ enum SyncTracker {
                 entity.setValue(NSNumber(value: Int16(newState)), forKey: "state")
                 entity.setValue(now, forKey: "updatedDate")
                 if conventions.usesOriginObjectID {
-                    entity.setValue(object.objectURI, forKey: "originObjectID")
+                    // Money's SyncKit stores the object's own uniqueIdentifier here.
+                    entity.setValue(object.uniqueID, forKey: "originObjectID")
                 }
             }
             try ctx.save()

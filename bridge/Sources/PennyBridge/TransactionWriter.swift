@@ -94,7 +94,7 @@ final class TransactionWriter {
     }
 
     private func validate(_ r: NewTransactionRequest, snapshot: MoneySnapshot) throws -> Plan {
-        guard let kind = Kind(rawValue: r.kind), kind != .transfer else {
+        guard let kind = Kind(rawValue: r.kind), kind == .expense || kind == .income else {
             throw BridgeError.invalid("Nieobsługiwany rodzaj transakcji: \(r.kind)")
         }
         guard let amount = Decimal.parse(r.amount), amount > 0, amount < 1_000_000_000 else {
@@ -104,7 +104,7 @@ final class TransactionWriter {
         guard !account.closed else { throw BridgeError.invalid("Konto „\(account.name)” jest zamknięte.") }
         var category: CategoryDTO?
         if let id = r.categoryId {
-            guard let c = snapshot.category(id), c.kind != Kind.transfer.rawValue else {
+            guard let c = snapshot.category(id), c.kind == Kind.expense.rawValue || c.kind == Kind.income.rawValue else {
                 throw BridgeError.invalid("Nie ma takiej kategorii.")
             }
             category = c
@@ -188,11 +188,9 @@ final class TransactionWriter {
             split.setValue(tx, forKey: "transaction")
             newObjects.append(split)
 
-            try ctx.obtainPermanentIDs(for: newObjects)
             try ctx.save()
             let objects = newObjects.map {
-                InsertedObject(entity: $0.entityName, uniqueID: $0.string("uniqueIdentifier") ?? "",
-                               objectURI: $0.objectID.uriRepresentation().absoluteString)
+                InsertedObject(entity: $0.entityName, uniqueID: $0.string("uniqueIdentifier") ?? "")
             }
             return (tx.publicID, objects)
         }

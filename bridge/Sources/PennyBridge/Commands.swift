@@ -25,7 +25,7 @@ enum Commands {
     static func serve() throws {
         let config = BridgeConfig.load()
         let name = config.serviceName ?? defaultServiceName
-        let api = API(config: config, serviceName: name)
+        let api = API(config: config, serviceName: name, controlsMoneyApp: config.controlMoneyApp)
         let server = try HTTPServer(port: UInt16(config.port), serviceName: name, handler: api.handle)
         try server.start()
         Log.info("penny-bridge \(bridgeVersion) nasłuchuje na porcie \(server.port) jako „\(name)”")
@@ -82,6 +82,8 @@ enum Commands {
         print("✓ Odczyt: \(snapshot.accounts.count) kont, \(snapshot.categories.count) kategorii, "
             + "\(snapshot.payees.count) odbiorców, \(snapshot.transactions.count) transakcji")
         print("  Format identyfikatorów: \(snapshot.idStyle.rawValue)")
+        let kinds = Dictionary(grouping: snapshot.categories, by: \.kind).mapValues(\.count)
+        print("  Kategorie: \(kinds.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
         for kind in [Kind.expense, .income] {
             if let t = snapshot.templatesByKind[kind] {
                 print("  Wzorzec \(kind.rawValue): transactionType=\(t.transactionType) split.type=\(t.splitType) "

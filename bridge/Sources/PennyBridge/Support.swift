@@ -117,6 +117,8 @@ struct BridgeConfig: Codable {
     var writesEnabled: Bool = true
     /// Start Money (hidden) after a write so it pushes the change to iCloud right away.
     var launchMoneyAfterWrite: Bool = true
+    /// Quit/relaunch Money around writes. Only disable when pointing the bridge at a copy of the data.
+    var controlMoneyApp: Bool = true
     var quitTimeoutSeconds: Double = 30
     var backupsToKeep: Int = 30
     /// SyncKit `SyncedEntityState.new`.
@@ -134,6 +136,7 @@ struct BridgeConfig: Codable {
         syncStorePath = try c.decodeIfPresent(String.self, forKey: .syncStorePath)
         writesEnabled = try c.decodeIfPresent(Bool.self, forKey: .writesEnabled) ?? d.writesEnabled
         launchMoneyAfterWrite = try c.decodeIfPresent(Bool.self, forKey: .launchMoneyAfterWrite) ?? d.launchMoneyAfterWrite
+        controlMoneyApp = try c.decodeIfPresent(Bool.self, forKey: .controlMoneyApp) ?? d.controlMoneyApp
         quitTimeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .quitTimeoutSeconds) ?? d.quitTimeoutSeconds
         backupsToKeep = try c.decodeIfPresent(Int.self, forKey: .backupsToKeep) ?? d.backupsToKeep
         syncNewState = try c.decodeIfPresent(Int.self, forKey: .syncNewState) ?? d.syncNewState

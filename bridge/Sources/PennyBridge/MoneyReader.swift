@@ -13,6 +13,8 @@ struct AccountDTO: Codable {
     let balance: String
     let transactionCount: Int
     let lastTransactionDate: Date?
+    /// Investment accounts: the balance covers cash only, not the value of held securities.
+    let hasInvestments: Bool
 }
 
 struct CategoryDTO: Codable {
@@ -20,7 +22,7 @@ struct CategoryDTO: Codable {
     let name: String
     let fullName: String
     let parentId: String?
-    /// "expense", "income" or "transfer" (transfer categories are hidden in the app's picker).
+    /// "expense", "income", "transfer" or "system" (the last two are not offered in the app's picker).
     let kind: String
     let usageCount: Int
 }
@@ -76,7 +78,7 @@ struct TransactionPageDTO: Codable {
 // MARK: - Learned conventions
 
 enum Kind: String, Codable {
-    case expense, income, transfer
+    case expense, income, transfer, system
 }
 
 /// Field values copied from an existing transaction so new ones look exactly like Money's own.
@@ -87,7 +89,6 @@ struct TransactionTemplate {
     /// Raw flag values (`NSNull` when unset) for attributes Money sets on every transaction.
     let flags: [String: Any]
     let hasCurrencyCode: Bool
-    let categoryRepresentation: String?
     let categoryID: String?
     let accountID: String
     let kind: Kind
@@ -191,7 +192,9 @@ enum MoneyReader {
         var categorySigns: [NSManagedObjectID: (neg: Int, pos: Int)] = [:]
         var payeeUsage: [NSManagedObjectID: Int] = [:]
         var templatesByCategory: [String: (date: Date, template: TransactionTemplate)] = [:]
-        var templatesByKind: [Kind: (date: Date, template: TransactionTemplate)] = [:]
+        var kindCandidates: [Kind: [Int: (date: Date, template: TransactionTemplate)]] = [:]
+        var splitTypeCounts: [Int: Int] = [:]
+        var investmentAccounts: Set<NSManagedObjectID> = []
         var idSamples: [String] = []
 
         for tx in transactionObjects {
@@ -235,22 +238,23 @@ enum MoneyReader {
 
             // Plain single-split transactions are the model for the ones created from the phone.
             if kind != .transfer, splitObjects.count == 1, let split = splitObjects.first, total != 0,
-               tx.string("eBankTransactionID") == nil {
+               tx.string("eBankTransactionID") == nil, tx.object("tradableAsset") == nil {
                 var flags: [String: Any] = [:]
                 for key in TransactionTemplate.flagKeys { flags[key] = tx.value(forKey: key) ?? NSNull() }
                 let category = split.object("category")
                 let template = TransactionTemplate(
                     transactionID: tx.publicID, transactionType: tx.int("transactionType"),
                     splitType: split.int("type"), flags: flags, hasCurrencyCode: tx.string("currencyCode") != nil,
-                    categoryRepresentation: split.string("categoryRepresentationString"),
                     categoryID: category?.publicID, accountID: account.publicID, kind: kind)
                 if let categoryID = category?.publicID, date > (templatesByCategory[categoryID]?.date ?? .distantPast) {
                     templatesByCategory[categoryID] = (date, template)
                 }
-                if date > (templatesByKind[kind]?.date ?? .distantPast) {
-                    templatesByKind[kind] = (date, template)
+                splitTypeCounts[template.splitType, default: 0] += 1
+                if date > (kindCandidates[kind]?[template.splitType]?.date ?? .distantPast) {
+                    kindCandidates[kind, default: [:]][template.splitType] = (date, template)
                 }
             }
+            if tx.object("tradableAsset") != nil { investmentAccounts.insert(account.objectID) }
         }
         transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
 
@@ -260,32 +264,42 @@ enum MoneyReader {
                 currency: accountCurrency[a.objectID] ?? "", folder: a.object("folder")?.string("name"),
                 closed: a.bool("closed"), sortOrder: a.int("sortOrder"),
                 balance: (balances[a.objectID] ?? 0).plainString, transactionCount: counts[a.objectID] ?? 0,
-                lastTransactionDate: lastDates[a.objectID])
+                lastTransactionDate: lastDates[a.objectID], hasInvestments: investmentAccounts.contains(a.objectID))
         }.sorted { ($0.closed ? 1 : 0, $0.sortOrder, $0.name) < ($1.closed ? 1 : 0, $1.sortOrder, $1.name) }
 
-        // Category kind: from how it's used; unused categories inherit the majority kind of their categoryType.
-        var typeVotes: [Int: (neg: Int, pos: Int)] = [:]
-        for c in categoryObjects {
-            guard let s = categorySigns[c.objectID] else { continue }
-            var v = typeVotes[c.int("categoryType")] ?? (0, 0)
-            if s.neg >= s.pos { v.neg += 1 } else { v.pos += 1 }
-            typeVotes[c.int("categoryType")] = v
+        // Model new transactions on the most recent plain entry using the dominant (non-investment) split type.
+        let regularSplitType = splitTypeCounts.max { $0.value < $1.value }?.key
+        var templatesByKind: [Kind: TransactionTemplate] = [:]
+        for (kind, byType) in kindCandidates {
+            if let regularSplitType, let t = byType[regularSplitType] { templatesByKind[kind] = t.template }
         }
+
+        // Money's own system categories (investments, balance adjustment, transfers) use dedicated
+        // categoryType values; the user's categories all share the most common one (9999 in Money 9).
+        var typeCounts: [Int: Int] = [:]
+        for c in categoryObjects where c.object("account") == nil { typeCounts[c.int("categoryType"), default: 0] += 1 }
+        let userCategoryType = typeCounts.max { $0.value < $1.value }?.key
+        let incomeType = templatesByKind[.income]?.transactionType
+        let expenseType = templatesByKind[.expense]?.transactionType
+
         let categories = categoryObjects.map { c -> CategoryDTO in
+            let signs = categorySigns[c.objectID] ?? (0, 0)
             let kind: Kind
             if c.object("account") != nil {
                 kind = .transfer
-            } else if let s = categorySigns[c.objectID] {
-                kind = s.neg >= s.pos ? .expense : .income
-            } else if let v = typeVotes[c.int("categoryType")] {
-                kind = v.neg >= v.pos ? .expense : .income
-            } else {
+            } else if c.int("categoryType") != userCategoryType {
+                kind = .system
+            } else if c.int("defaultTransactionType") == expenseType {
                 kind = .expense
+            } else if c.int("defaultTransactionType") == incomeType {
+                kind = .income
+            } else {
+                kind = signs.pos > signs.neg ? .income : .expense
             }
-            let s = categorySigns[c.objectID] ?? (0, 0)
             return CategoryDTO(
                 id: c.publicID, name: c.string("name") ?? "?", fullName: fullName(c),
-                parentId: c.object("parentCategory")?.publicID, kind: kind.rawValue, usageCount: s.neg + s.pos)
+                parentId: c.object("parentCategory")?.publicID, kind: kind.rawValue,
+                usageCount: signs.neg + signs.pos)
         }.sorted { $0.fullName.localizedCompare($1.fullName) == .orderedAscending }
 
         let payees = payeeObjects.compactMap { p -> PayeeDTO? in
@@ -298,6 +312,6 @@ enum MoneyReader {
             generation: generation, defaultCurrency: defaultCurrency, accounts: accounts,
             categories: categories, payees: payees, transactions: transactions,
             templatesByCategory: templatesByCategory.mapValues(\.template),
-            templatesByKind: templatesByKind.mapValues(\.template), idStyle: IDStyle.detect(idSamples))
+            templatesByKind: templatesByKind, idStyle: IDStyle.detect(idSamples))
     }
 }

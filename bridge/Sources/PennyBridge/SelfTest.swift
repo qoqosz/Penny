@@ -54,6 +54,8 @@ enum SelfTest {
         let food = categories.first { $0["id"] as? String == ids.food }
         check(food?["kind"] as? String == "expense", "kategoria Jedzenie rozpoznana jako wydatek")
         check(categories.first { $0["id"] as? String == ids.salary }?["kind"] as? String == "income", "Pensja jako przychód")
+        check(categories.first { $0["name"] as? String == "Balance Adjustment" }?["kind"] as? String == "system",
+              "kategoria systemowa ukryta")
 
         print("Zapis")
         let clientId = UUID().uuidString
@@ -140,8 +142,9 @@ enum SelfTest {
             }
             let pln = make("Currency", ["code": "PLN", "defaultCurrency": true])
             let account = make("Account", ["name": "Konto testowe", "currency": pln])
-            let food = make("Category", ["name": "Jedzenie", "categoryType": 2])
-            let salary = make("Category", ["name": "Pensja", "categoryType": 1])
+            let food = make("Category", ["name": "Jedzenie", "categoryType": 9999, "defaultTransactionType": 21])
+            let salary = make("Category", ["name": "Pensja", "categoryType": 9999, "defaultTransactionType": 11])
+            _ = make("Category", ["name": "Balance Adjustment", "categoryType": 30, "defaultTransactionType": -1])
             for (type, amount, category) in [(21, "-10", food), (11, "100", salary)] {
                 let tx = make("Transaction", [
                     "account": account, "date": Date(timeIntervalSinceNow: -86400), "transactionType": type,

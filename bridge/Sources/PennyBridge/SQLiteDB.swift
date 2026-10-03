@@ -8,13 +8,16 @@ final class SQLiteDB {
     private var db: OpaquePointer?
 
     init(path: String) throws {
-        if sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
+        // A read-only connection can't open a WAL database whose -shm file is gone (Money deletes it on quit),
+        // so open read-write without create and forbid writes at the connection level instead.
+        if sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) != SQLITE_OK {
             let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
             sqlite3_close(db)
             db = nil
             throw BridgeError.internal("Nie można otworzyć \(path): \(message)")
         }
         sqlite3_busy_timeout(db, 5000)
+        _ = try query("PRAGMA query_only = 1")
     }
 
     deinit { sqlite3_close(db) }
