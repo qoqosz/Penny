@@ -183,7 +183,7 @@ fun SettingsScreen(
 
             HorizontalDivider(Modifier.padding(top = 8.dp))
             SectionHeader(stringResource(R.string.settings_about))
-            SettingRow(title = stringResource(R.string.version), subtitle = appVersion())
+            SettingRow(title = stringResource(R.string.version), subtitle = "v${appVersion()}")
         }
     }
 
