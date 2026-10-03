@@ -4,11 +4,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -19,6 +21,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.penny.PennyApplication
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 private object Routes {
     const val SETUP = "setup"
@@ -41,7 +44,9 @@ fun PennyApp(app: PennyApplication) {
     }
     val nav = rememberNavController()
 
-    LaunchedEffect(Unit) { if (isPaired) repository.refresh() }
+    // Refresh whenever the app comes to the foreground; a no-op until paired.
+    val scope = rememberCoroutineScope()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { scope.launch { repository.refresh() } }
 
     NavHost(navController = nav, startDestination = if (isPaired) Routes.HOME else Routes.SETUP) {
         composable(Routes.SETUP) {
