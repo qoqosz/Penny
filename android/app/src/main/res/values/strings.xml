@@ -107,6 +107,7 @@
     <string name="settings_accounts">Accounts</string>
     <string name="hidden_folders_summary">Hide checked folders. Their accounts don\'t appear on the main screen, in the totals or when adding a transaction.</string>
     <string name="hidden_folders_empty">Money folders appear here once accounts have been downloaded from the Mac.</string>
+    <string name="hidden_folders_old_bridge">To hide folders, update Penny Bridge on the Mac (penny-bridge install), then refresh.</string>
     <plurals name="account_count">
         <item quantity="one">%d account</item>
         <item quantity="other">%d accounts</item>
@@ -120,6 +121,7 @@
     <string name="lock_summary">Require a PIN to open Penny</string>
     <string name="biometric_title">Unlock with biometrics</string>
     <string name="biometric_summary">Fingerprint or face</string>
+    <string name="biometric_summary_no_pin">Fingerprint or face, with the phone\'s screen lock as a fallback. Turning this off turns the lock off.</string>
     <string name="biometric_unavailable">No strong biometrics set up on this device</string>
     <string name="lock_after">Lock after</string>
     <string name="lock_after_immediately">Immediately</string>
@@ -128,6 +130,7 @@
         <item quantity="other">After %d minutes</item>
     </plurals>
     <string name="change_pin">Change PIN</string>
+    <string name="set_pin">Set PIN</string>
     <string name="settings_mac">Mac</string>
     <string name="mac_not_paired">Not connected</string>
     <string name="unpair">Disconnect from Mac</string>
@@ -152,6 +155,10 @@
     <string name="biometric_confirm_title">Confirm biometric unlock</string>
     <string name="biometric_use_pin">Use PIN</string>
     <string name="pin_forgot">Forgot PIN?</string>
+    <string name="lock_cant_unlock">Can\'t unlock?</string>
+    <string name="lock_locked">Penny is locked</string>
+    <string name="lock_unlock">Unlock</string>
+    <string name="biometric_lock_unavailable">Biometrics aren\'t available on this phone right now.</string>
     <string name="pin_reset_title">Reset app lock?</string>
     <string name="pin_reset_text">Penny will disconnect from the Mac, remove downloaded data and turn the lock off. You\'ll need to pair with the Mac again. Pending transactions are kept.</string>
     <string name="pin_reset_confirm">Reset</string>

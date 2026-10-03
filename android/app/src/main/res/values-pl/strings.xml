@@ -105,6 +105,7 @@
     <string name="settings_accounts">Konta</string>
     <string name="hidden_folders_summary">Ukryj zaznaczone foldery. Ich konta nie będą widoczne na ekranie głównym, w sumach ani przy dodawaniu transakcji.</string>
     <string name="hidden_folders_empty">Foldery z Money pojawią się tutaj po pobraniu kont z Maca.</string>
+    <string name="hidden_folders_old_bridge">Aby ukrywać foldery, zaktualizuj Penny Bridge na Macu (penny-bridge install), a potem odśwież.</string>
     <plurals name="account_count">
         <item quantity="one">%d konto</item>
         <item quantity="few">%d konta</item>
@@ -122,6 +123,7 @@
     <string name="lock_summary">Wymagaj kodu PIN do otwarcia Penny</string>
     <string name="biometric_title">Odblokowanie biometrią</string>
     <string name="biometric_summary">Odcisk palca lub twarz</string>
+    <string name="biometric_summary_no_pin">Odcisk palca lub twarz, awaryjnie blokada ekranu telefonu. Wyłączenie wyłącza blokadę.</string>
     <string name="biometric_unavailable">Na tym urządzeniu nie skonfigurowano silnej biometrii</string>
     <string name="lock_after">Blokuj po</string>
     <string name="lock_after_immediately">Natychmiast</string>
@@ -132,6 +134,7 @@
         <item quantity="other">Po %d minuty</item>
     </plurals>
     <string name="change_pin">Zmień PIN</string>
+    <string name="set_pin">Ustaw PIN</string>
     <string name="settings_mac">Mac</string>
     <string name="mac_not_paired">Nie połączono</string>
     <string name="unpair">Rozłącz z Makiem</string>
@@ -156,6 +159,10 @@
     <string name="biometric_confirm_title">Potwierdź odblokowanie biometrią</string>
     <string name="biometric_use_pin">Użyj kodu PIN</string>
     <string name="pin_forgot">Nie pamiętasz kodu PIN?</string>
+    <string name="lock_cant_unlock">Nie możesz odblokować?</string>
+    <string name="lock_locked">Penny jest zablokowana</string>
+    <string name="lock_unlock">Odblokuj</string>
+    <string name="biometric_lock_unavailable">Biometria jest teraz niedostępna na tym telefonie.</string>
     <string name="pin_reset_title">Zresetować blokadę?</string>
     <string name="pin_reset_text">Penny rozłączy się z Makiem, usunie pobrane dane i wyłączy blokadę. Trzeba będzie ponownie sparować telefon z Makiem. Oczekujące transakcje zostaną zachowane.</string>
     <string name="pin_reset_confirm">Resetuj</string>

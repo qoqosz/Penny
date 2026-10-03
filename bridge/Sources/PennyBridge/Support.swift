@@ -56,6 +56,23 @@ struct BridgeError: Error, CustomStringConvertible {
 
     func message(in language: Language) -> String { language == .polish ? message : englishMessage }
 
+    /// What the phone is told. Failures on the bridge's side (5xx) are about the Mac (paths, permissions, SQL) and can't be
+    /// fixed from the phone, so it only gets a pointer to the Mac; the details go to the bridge log and `doctor`.
+    func clientMessage(in language: Language) -> String {
+        switch status {
+        case 503:
+            return language == .polish
+                ? "Most na Macu wymaga uwagi. Uruchom na Macu „penny-bridge doctor”, żeby zobaczyć, co naprawić."
+                : "The bridge on the Mac needs attention. Run “penny-bridge doctor” on the Mac to see what to fix."
+        case 500...:
+            return language == .polish
+                ? "Coś poszło nie tak na Macu. Szczegóły są w logu mostu na Macu."
+                : "Something went wrong on the Mac. Details are in the bridge log on the Mac."
+        default:
+            return message(in: language)
+        }
+    }
+
     static func badRequest(_ pl: String, en: String) -> BridgeError { .init(status: 400, code: "bad_request", pl, en) }
     static func unauthorized(
         _ pl: String = "Brak autoryzacji. Sparuj urządzenie ponownie.",

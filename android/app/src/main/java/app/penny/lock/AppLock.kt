@@ -25,7 +25,10 @@ data class LockConfig(
     val pinLength: Int = 0,
     /** How long the app may stay in the background before it locks again. */
     val timeoutMillis: Long = 0,
-)
+) {
+    /** False when the lock is biometrics-only. */
+    val hasPin: Boolean get() = pinLength > 0
+}
 
 sealed interface PinResult {
     data object Correct : PinResult
@@ -35,7 +38,7 @@ sealed interface PinResult {
 }
 
 /**
- * PIN / biometric gate in front of the whole UI. The app starts locked when the lock is on and locks again after
+ * PIN / biometric gate in front of the whole UI. The lock is a PIN (optionally with biometrics), or biometrics alone. The app starts locked when the lock is on and locks again after
  * spending [LockConfig.timeoutMillis] in the background (observe it with ProcessLifecycleOwner).
  *
  * Only a salted PBKDF2 hash of the PIN is stored. Repeated wrong PINs block entry for a growing time, persisted so
@@ -114,6 +117,12 @@ class AppLock(
             putLong(KEY_LOCKOUT_UNTIL, 0)
         }
         _config.value = readConfig()
+    }
+
+    /** Turns the lock on without a PIN, after a successful BiometricPrompt. */
+    fun enableWithBiometrics() = update {
+        putBoolean(KEY_ENABLED, true)
+        putBoolean(KEY_BIOMETRICS, true)
     }
 
     fun disable() {

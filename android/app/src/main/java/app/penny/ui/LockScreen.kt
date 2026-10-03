@@ -56,9 +56,10 @@ import app.penny.lock.PinResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Covers the whole app while it's locked. [onReset] wipes pairing and data after a forgotten PIN. */
+/** Covers the whole app while it's locked. [onReset] wipes pairing and data after a forgotten PIN or failing biometrics. */
 @Composable
 fun LockScreen(lock: AppLock, onReset: () -> Unit) {
+    val config by lock.config.collectAsStateWithLifecycle()
     var confirmReset by remember { mutableStateOf(false) }
     Surface(Modifier.fillMaxSize()) {
         PinVerifier(
@@ -68,7 +69,9 @@ fun LockScreen(lock: AppLock, onReset: () -> Unit) {
             unlock = true,
             onVerified = {},
             footer = {
-                TextButton(onClick = { confirmReset = true }) { Text(stringResource(R.string.pin_forgot)) }
+                TextButton(onClick = { confirmReset = true }) {
+                    Text(stringResource(if (config.hasPin) R.string.pin_forgot else R.string.lock_cant_unlock))
+                }
             },
         )
     }
@@ -156,11 +159,13 @@ private fun PinVerifier(
     }
 
     val activity = context.findFragmentActivity()
-    val usePin = stringResource(R.string.biometric_use_pin)
-    val biometricsAvailable = remember { Biometrics.available(context) }
+    // Without a PIN the phone's screen lock is the fallback, offered inside the system prompt.
+    val withoutPin = !config.hasPin
+    val negativeButton = stringResource(if (withoutPin) R.string.action_cancel else R.string.biometric_use_pin)
+    val biometricsAvailable = remember(withoutPin) { Biometrics.available(context, allowDeviceCredential = withoutPin) }
     val biometrics: (() -> Unit)? = if (config.biometrics && activity != null && biometricsAvailable) {
         {
-            Biometrics.prompt(activity, biometricTitle, usePin) {
+            Biometrics.prompt(activity, biometricTitle, negativeButton, allowDeviceCredential = withoutPin) {
                 if (unlock) lock.unlockWithBiometrics()
                 onVerified()
             }
@@ -175,6 +180,10 @@ private fun PinVerifier(
         }
     }
 
+    if (withoutPin) {
+        BiometricGate(onBiometrics = biometrics, footer = footer)
+        return
+    }
     PinPad(
         title = title,
         message = when {
@@ -278,6 +287,41 @@ private fun PinPad(
             Button(onClick = ::submit, enabled = enabled && pin.length in AppLock.PIN_LENGTHS) {
                 Text(stringResource(R.string.action_continue))
             }
+        }
+        Spacer(Modifier.height(16.dp))
+        footer()
+    }
+}
+
+/** Lock screen of a biometrics-only lock. [onBiometrics] is null when the phone can't check biometrics right now. */
+@Composable
+private fun BiometricGate(onBiometrics: (() -> Unit)?, footer: @Composable () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Outlined.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.lock_locked), style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        if (onBiometrics == null) {
+            Text(
+                stringResource(R.string.biometric_lock_unavailable),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center,
+            )
+        }
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = { onBiometrics?.invoke() }, enabled = onBiometrics != null) {
+            Icon(Icons.Outlined.Fingerprint, contentDescription = null)
+            Spacer(Modifier.size(8.dp))
+            Text(stringResource(R.string.lock_unlock))
         }
         Spacer(Modifier.height(16.dp))
         footer()

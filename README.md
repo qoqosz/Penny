@@ -60,11 +60,13 @@ The settings screen (gear icon on the main screen) offers:
 
 - **Theme:** system default, light or dark.
 - **Accounts:** hide chosen Money folders (e.g. an archive folder). Their accounts disappear from the main screen,
-  the totals and the account picker. Hiding follows the folder, so renaming it in Money doesn't matter.
+  the totals and the account picker. Hiding follows the folder, so renaming it in Money doesn't matter. This needs
+  a bridge that sends folder IDs; with an older one, settings asks to update it.
 - **Language:** system default, English or Polish. On Android 13+ the language can also be changed in the system
   settings (Apps → Penny → Language).
 - **App lock:** a 4–8 digit PIN required to open Penny, optionally with biometric unlock (fingerprint/face, Class 3
-  only). The app locks on start and after being in the background for the chosen time. After 5 wrong PINs, entry is
+  only). Biometrics can also be the whole lock, without a PIN; the phone's screen lock is then the fallback
+  (Android 11+). The app locks on start and after being in the background for the chosen time. After 5 wrong PINs, entry is
   blocked for a while, and the delay grows with further mistakes. A forgotten PIN can be reset, which disconnects the
   phone from the Mac and removes downloaded data (pending transactions are kept).
 - **Mac:** the connected bridge and disconnecting from it.

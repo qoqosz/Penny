@@ -37,6 +37,12 @@ enum SelfTest {
             check(Language(acceptLanguage: header) == expected, "Accept-Language \(header.map { "„\($0)”" } ?? "brak") → \(expected)")
         }
 
+        let macOnly = BridgeError.setup("Brak dostępu do /Users/x/Money.sqlite", en: "No access to /Users/x/Money.sqlite")
+        check(!macOnly.clientMessage(in: .english).contains("/Users") && macOnly.clientMessage(in: .polish).contains("doctor"),
+              "błąd po stronie Maca bez szczegółów dla telefonu")
+        let invalid = BridgeError.invalid("Kwota musi być dodatnia.", en: "The amount must be positive.")
+        check(invalid.clientMessage(in: .english) == invalid.englishMessage, "błąd danych trafia do telefonu bez zmian")
+
         print("Serwer HTTP")
         let api = API(config: config, serviceName: "selftest", location: location, controlsMoneyApp: false)
         let server = try HTTPServer(port: 0, serviceName: nil, handler: api.handle)

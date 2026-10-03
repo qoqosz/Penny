@@ -75,6 +75,25 @@ class AppLockTest {
         assertEquals(AppLock.lockoutAfter(100), AppLock.lockoutAfter(1000))
     }
 
+    @Test fun `biometrics alone turn the lock on`() = runTest {
+        lock.enableWithBiometrics()
+        assertTrue(lock.config.value.enabled)
+        assertTrue(lock.config.value.biometrics)
+        assertFalse(lock.config.value.hasPin)
+        val restarted = AppLock(prefs, now = { now }, elapsed = { elapsed })
+        assertTrue(restarted.locked.value)
+        assertEquals("no PIN to guess", PinResult.Wrong, restarted.unlockWithPin("0000"))
+        restarted.unlockWithBiometrics()
+        assertFalse(restarted.locked.value)
+    }
+
+    @Test fun `adding a PIN keeps biometrics`() = runTest {
+        lock.enableWithBiometrics()
+        lock.setPin("4821")
+        assertTrue(lock.config.value.hasPin)
+        assertTrue(lock.config.value.biometrics)
+    }
+
     @Test fun `turning the lock off forgets the PIN`() = runTest {
         lock.setPin("4821")
         lock.setBiometrics(true)

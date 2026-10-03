@@ -84,6 +84,22 @@ fun SettingsScreen(
     var pinFlow by remember { mutableStateOf<PinFlow?>(null) }
     var confirmUnpair by remember { mutableStateOf(false) }
 
+    /**
+     * Confirms the user before changing a biometrics-only lock, the way the PIN does otherwise. When the phone can't
+     * check anything right now, the user is let through: they're already past the lock screen.
+     */
+    fun confirmWithoutPin(onConfirmed: () -> Unit) {
+        val activity = context.findFragmentActivity()
+        if (activity == null || !Biometrics.available(context, allowDeviceCredential = true)) return onConfirmed()
+        Biometrics.prompt(
+            activity,
+            context.getString(R.string.settings_security),
+            context.getString(R.string.action_cancel),
+            allowDeviceCredential = true,
+            onSuccess = onConfirmed,
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -123,34 +139,47 @@ fun SettingsScreen(
             SettingRow(
                 title = stringResource(R.string.lock_title),
                 subtitle = stringResource(R.string.lock_summary),
-                onClick = { pinFlow = if (lockConfig.enabled) PinFlow.DISABLE else PinFlow.ENABLE },
+                onClick = {
+                    when {
+                        !lockConfig.enabled -> pinFlow = PinFlow.ENABLE
+                        lockConfig.hasPin -> pinFlow = PinFlow.DISABLE
+                        else -> confirmWithoutPin(lock::disable)
+                    }
+                },
                 trailing = { Switch(checked = lockConfig.enabled, onCheckedChange = null) },
             )
-            val biometricsEnabled = lockConfig.enabled && biometricsAvailable
+            // Biometrics can be turned on before a PIN exists; the lock is then biometrics-only.
             SettingRow(
                 title = stringResource(R.string.biometric_title),
                 subtitle = stringResource(
-                    if (biometricsAvailable) R.string.biometric_summary else R.string.biometric_unavailable
+                    when {
+                        !biometricsAvailable -> R.string.biometric_unavailable
+                        lockConfig.enabled && !lockConfig.hasPin -> R.string.biometric_summary_no_pin
+                        else -> R.string.biometric_summary
+                    }
                 ),
-                enabled = biometricsEnabled,
+                enabled = biometricsAvailable,
                 onClick = {
-                    if (lockConfig.biometrics) {
-                        lock.setBiometrics(false)
-                    } else {
-                        // Make sure the sensor works for this user before relying on it.
-                        val activity = context.findFragmentActivity() ?: return@SettingRow
-                        Biometrics.prompt(
-                            activity,
-                            context.getString(R.string.biometric_confirm_title),
-                            context.getString(R.string.action_cancel),
-                        ) { lock.setBiometrics(true) }
+                    when {
+                        // Without a PIN, biometrics are the whole lock.
+                        lockConfig.biometrics && !lockConfig.hasPin -> confirmWithoutPin(lock::disable)
+                        lockConfig.biometrics -> lock.setBiometrics(false)
+                        else -> {
+                            // Make sure the sensor works for this user before relying on it.
+                            val activity = context.findFragmentActivity() ?: return@SettingRow
+                            Biometrics.prompt(
+                                activity,
+                                context.getString(R.string.biometric_confirm_title),
+                                context.getString(R.string.action_cancel),
+                            ) { if (lockConfig.enabled) lock.setBiometrics(true) else lock.enableWithBiometrics() }
+                        }
                     }
                 },
                 trailing = {
                     Switch(
-                        checked = lockConfig.biometrics && biometricsEnabled,
+                        checked = lockConfig.biometrics && biometricsAvailable,
                         onCheckedChange = null,
-                        enabled = biometricsEnabled,
+                        enabled = biometricsAvailable,
                     )
                 },
             )
@@ -161,9 +190,12 @@ fun SettingsScreen(
                 onClick = { picker = Picker.TIMEOUT },
             )
             SettingRow(
-                title = stringResource(R.string.change_pin),
+                title = stringResource(if (lockConfig.hasPin || !lockConfig.enabled) R.string.change_pin else R.string.set_pin),
                 enabled = lockConfig.enabled,
-                onClick = { pinFlow = PinFlow.CHANGE_VERIFY },
+                onClick = {
+                    if (lockConfig.hasPin) pinFlow = PinFlow.CHANGE_VERIFY
+                    else confirmWithoutPin { pinFlow = PinFlow.CHANGE_NEW }
+                },
             )
 
             HorizontalDivider(Modifier.padding(top = 8.dp))
@@ -256,8 +288,16 @@ private fun HiddenFolders(
     onChange: (folderId: String, hidden: Boolean) -> Unit,
 ) {
     val folders = accounts.orEmpty().filter { it.folderId != null }.groupBy { it.folderId!! }
+    // Bridges before folder IDs send only folder names, which can't be used to hide anything.
+    val oldBridge = folders.isEmpty() && accounts.orEmpty().any { it.folder != null }
     Text(
-        stringResource(if (folders.isEmpty()) R.string.hidden_folders_empty else R.string.hidden_folders_summary),
+        stringResource(
+            when {
+                oldBridge -> R.string.hidden_folders_old_bridge
+                folders.isEmpty() -> R.string.hidden_folders_empty
+                else -> R.string.hidden_folders_summary
+            }
+        ),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),

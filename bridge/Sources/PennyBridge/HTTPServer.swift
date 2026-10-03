@@ -62,7 +62,7 @@ struct HTTPResponse {
     static func error(_ e: BridgeError, in language: Language) -> HTTPResponse {
         struct Body: Encodable { let error: Inner }
         struct Inner: Encodable { let code: String; let message: String }
-        let inner = Inner(code: e.code, message: e.message(in: language))
+        let inner = Inner(code: e.code, message: e.clientMessage(in: language))
         let body = (try? API.encoder.encode(Body(error: inner))) ?? Data()
         return HTTPResponse(status: e.status, body: body)
     }
