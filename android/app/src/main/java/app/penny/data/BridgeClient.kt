@@ -17,7 +17,9 @@ class BridgeException(val status: Int, val code: String, message: String) : Exce
 }
 
 /** The Mac couldn't be reached (offline, other network, Mac asleep). */
-class UnreachableException(cause: Throwable) : Exception("Brak połączenia z Makiem", cause)
+class UnreachableException(cause: Throwable) : Exception("Mac unreachable", cause)
+
+class NotPairedException : Exception("Not paired with a Mac")
 
 class BridgeClient(private val http: OkHttpClient = defaultHttp) {
 
@@ -72,7 +74,7 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
                 val text = it.body?.string().orEmpty()
                 if (!it.isSuccessful) {
                     val error = runCatching { json.decodeFromString(ApiErrorBody.serializer(), text).error }.getOrNull()
-                    throw BridgeException(it.code, error?.code ?: "http", error?.message ?: "Błąd ${it.code}")
+                    throw BridgeException(it.code, error?.code ?: "http", error?.message ?: "HTTP ${it.code}")
                 }
                 json.decodeFromString<T>(text)
             }

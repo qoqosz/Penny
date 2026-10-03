@@ -4,16 +4,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -28,6 +35,7 @@ private object Routes {
     const val HOME = "home"
     const val ACCOUNT = "account/{id}"
     const val ADD = "add?accountId={accountId}"
+    const val SETTINGS = "settings"
 
     fun account(id: String) = "account/${android.net.Uri.encode(id)}"
     fun add(accountId: String?) = if (accountId == null) "add" else "add?accountId=${android.net.Uri.encode(accountId)}"
@@ -43,19 +51,52 @@ fun PennyApp(app: PennyApplication) {
         return
     }
     val nav = rememberNavController()
+    val toSetup = { nav.navigate(Routes.SETUP) { popUpTo(0) { inclusive = true } } }
 
     // Refresh whenever the app comes to the foreground; a no-op until paired.
     val scope = rememberCoroutineScope()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { scope.launch { repository.refresh() } }
 
-    NavHost(navController = nav, startDestination = if (isPaired) Routes.HOME else Routes.SETUP) {
+    // While locked the screens leave the composition entirely (so their dialogs can't show above the lock screen),
+    // and the state holder keeps their saved state for when they come back.
+    val locked by app.appLock.locked.collectAsStateWithLifecycle()
+    val screens = rememberSaveableStateHolder()
+    var resetAfterUnlock by rememberSaveable { mutableStateOf(false) }
+    if (locked) {
+        LockScreen(app.appLock, onReset = {
+            scope.launch {
+                repository.unpair()
+                app.appLock.disable()
+                resetAfterUnlock = true
+            }
+        })
+        return
+    }
+    if (resetAfterUnlock) {
+        LaunchedEffect(Unit) {
+            toSetup()
+            resetAfterUnlock = false
+        }
+    }
+
+    screens.SaveableStateProvider("screens") {
+        Screens(app, nav, startDestination = if (isPaired) Routes.HOME else Routes.SETUP, toSetup)
+    }
+}
+
+@Composable
+private fun Screens(app: PennyApplication, nav: NavHostController, startDestination: String, toSetup: () -> Unit) {
+    val repository = app.repository
+    NavHost(navController = nav, startDestination = startDestination) {
         composable(Routes.SETUP) {
             val vm: SetupViewModel = viewModel(factory = viewModelFactory {
                 initializer { SetupViewModel(repository, app.discovery) }
             })
-            SetupScreen(vm, onPaired = {
-                nav.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
-            })
+            SetupScreen(
+                vm,
+                onPaired = { nav.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } } },
+                onOpenSettings = { nav.navigate(Routes.SETTINGS) },
+            )
         }
         composable(Routes.HOME) {
             val vm: TransactionsViewModel = viewModel(key = "recent", factory = viewModelFactory {
@@ -66,7 +107,7 @@ fun PennyApp(app: PennyApplication) {
                 recent = vm,
                 onOpenAccount = { nav.navigate(Routes.account(it)) },
                 onAdd = { nav.navigate(Routes.add(null)) },
-                onUnpaired = { nav.navigate(Routes.SETUP) { popUpTo(0) { inclusive = true } } },
+                onOpenSettings = { nav.navigate(Routes.SETTINGS) },
             )
         }
         composable(Routes.ACCOUNT, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
@@ -91,6 +132,16 @@ fun PennyApp(app: PennyApplication) {
                 initializer { AddTransactionViewModel(repository, accountId) }
             })
             AddTransactionScreen(repository = repository, vm = vm, onDone = { nav.popBackStack() })
+        }
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                preferences = app.preferences,
+                lock = app.appLock,
+                settings = app.settings,
+                repository = repository,
+                onBack = { nav.popBackStack() },
+                onUnpaired = toSetup,
+            )
         }
     }
 }

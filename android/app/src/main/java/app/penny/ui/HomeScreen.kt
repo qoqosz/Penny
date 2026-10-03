@@ -14,18 +14,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShowChart
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -35,7 +32,6 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -49,8 +45,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.penny.R
 import app.penny.data.Account
 import app.penny.data.Repository
 import app.penny.data.SyncStatus
@@ -64,41 +63,35 @@ fun HomeScreen(
     recent: TransactionsViewModel,
     onOpenAccount: (String) -> Unit,
     onAdd: () -> Unit,
-    onUnpaired: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(0) }
-    var menu by remember { mutableStateOf(false) }
-    var confirmUnpair by remember { mutableStateOf(false) }
     val syncing = app.status == SyncStatus.Syncing
 
     Scaffold(
         topBar = {
             Column {
                 TopAppBar(
-                    title = { Text("Penny") },
+                    title = { Text(stringResource(R.string.app_name)) },
                     actions = {
                         if (syncing) {
                             CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
                         } else {
                             IconButton(onClick = { scope.launch { repository.refresh() } }) {
-                                Icon(Icons.Filled.Refresh, contentDescription = "Odśwież")
+                                Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.action_refresh))
                             }
                         }
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Więcej") }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Rozłącz z Makiem") },
-                                onClick = { menu = false; confirmUnpair = true },
-                            )
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings))
                         }
                     },
                 )
                 StatusBanner(app.status)
                 PrimaryTabRow(selectedTabIndex = tab) {
-                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Konta") })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Ostatnie") })
+                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.tab_accounts)) })
+                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.tab_recent)) })
                 }
             }
         },
@@ -107,7 +100,7 @@ fun HomeScreen(
                 ExtendedFloatingActionButton(
                     onClick = onAdd,
                     icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    text = { Text("Dodaj") },
+                    text = { Text(stringResource(R.string.action_add)) },
                 )
             }
         },
@@ -123,21 +116,6 @@ fun HomeScreen(
             }
         }
     }
-
-    if (confirmUnpair) {
-        AlertDialog(
-            onDismissRequest = { confirmUnpair = false },
-            title = { Text("Rozłączyć z Makiem?") },
-            text = { Text("Telefon zapomni token dostępu i dane z pamięci. Oczekujące transakcje zostaną zachowane.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmUnpair = false
-                    scope.launch { repository.unpair(); onUnpaired() }
-                }) { Text("Rozłącz") }
-            },
-            dismissButton = { TextButton(onClick = { confirmUnpair = false }) { Text("Anuluj") } },
-        )
-    }
 }
 
 @Composable
@@ -146,15 +124,17 @@ private fun AccountsList(accounts: List<Account>?, status: SyncStatus, onOpen: (
     if (accounts == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (status == SyncStatus.Syncing) CircularProgressIndicator()
-            else EmptyState("Brak danych. Pociągnij w dół, aby pobrać konta z Maca.")
+            else EmptyState(stringResource(R.string.accounts_empty))
         }
         return
     }
     val open = accounts.filter { !it.closed }
     val closed = accounts.filter { it.closed }
+    val defaultFolder = stringResource(R.string.accounts_default_folder)
+    val closedTitle = stringResource(R.string.accounts_closed, closed.size)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         item(key = "totals") { TotalsCard(open) }
-        open.groupBy { it.folder ?: "Konta" }.forEach { (folder, list) ->
+        open.groupBy { it.folder ?: defaultFolder }.forEach { (folder, list) ->
             val sums = list.groupBy { it.currency }.map { (cur, a) -> Format.money(a.sumOf { it.balanceValue }, cur) }
             item(key = "f-$folder") { SectionHeader(folder, sums.joinToString(" · ")) }
             items(list, key = { it.id }) { AccountRow(it, onOpen) }
@@ -162,7 +142,7 @@ private fun AccountsList(accounts: List<Account>?, status: SyncStatus, onOpen: (
         if (closed.isNotEmpty()) {
             item(key = "closed") {
                 ListRow(
-                    title = "Zamknięte konta (${closed.size})",
+                    title = closedTitle,
                     subtitle = "",
                     modifier = Modifier.clickable { showClosed = !showClosed },
                     leading = {
@@ -185,13 +165,13 @@ private fun TotalsCard(accounts: List<Account>) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Razem na otwartych kontach", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.totals_title), style = MaterialTheme.typography.labelLarge)
             totals.forEach { (currency, total) ->
                 Text(Format.money(total, currency), style = MaterialTheme.typography.headlineSmall)
             }
             if (accounts.any { it.hasInvestments }) {
                 Text(
-                    "Konta inwestycyjne liczone bez wartości papierów",
+                    stringResource(R.string.totals_investments_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                 )
@@ -211,7 +191,8 @@ private fun AccountRow(account: Account, onOpen: (String) -> Unit) {
             )
         },
         title = account.name,
-        subtitle = if (account.hasInvestments) "Saldo gotówkowe" else "${account.transactionCount} transakcji",
+        subtitle = if (account.hasInvestments) stringResource(R.string.balance_cash)
+        else pluralStringResource(R.plurals.transaction_count, account.transactionCount, account.transactionCount),
         trailing = {
             Text(
                 Format.money(account.balanceValue, account.currency),
@@ -241,8 +222,8 @@ fun androidx.compose.foundation.lazy.LazyListScope.listFooter(list: TransactionL
             list.loading -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             }
-            list.error != null -> EmptyState(list.error)
-            list.items.isEmpty() -> EmptyState("Brak transakcji")
+            list.error != null -> EmptyState(list.error.userMessage())
+            list.items.isEmpty() -> EmptyState(stringResource(R.string.no_transactions))
         }
     }
 }

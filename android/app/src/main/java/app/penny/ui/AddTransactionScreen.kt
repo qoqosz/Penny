@@ -48,6 +48,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.penny.R
 import app.penny.data.Category
 import app.penny.data.Kind
 import app.penny.data.Repository
@@ -73,14 +75,17 @@ fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, on
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Nowa transakcja") },
-                navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.Filled.Close, contentDescription = "Anuluj") } },
-                actions = { TextButton(onClick = { vm.save(onDone) }, enabled = snapshot != null) { Text("Zapisz") } },
+                title = { Text(stringResource(R.string.add_title)) },
+                navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_cancel)) } },
+                actions = { TextButton(onClick = { vm.save(onDone) }, enabled = snapshot != null) {
+                        Text(stringResource(R.string.action_save))
+                    }
+                },
             )
         },
     ) { padding ->
         if (snapshot == null) {
-            EmptyState("Najpierw połącz się z Makiem, aby pobrać konta i kategorie.", Modifier.padding(padding))
+            EmptyState(stringResource(R.string.add_connect_first), Modifier.padding(padding))
             return@Scaffold
         }
         val account = snapshot.accounts.firstOrNull { it.id == form.accountId }
@@ -95,7 +100,7 @@ fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, on
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             if (!snapshot.writesEnabled) {
-                Text("Zapis jest wyłączony w konfiguracji mostu na Macu.", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.add_writes_disabled), color = MaterialTheme.colorScheme.error)
             }
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 Kind.entries.forEachIndexed { index, kind ->
@@ -103,14 +108,14 @@ fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, on
                         selected = form.kind == kind,
                         onClick = { vm.setKind(kind) },
                         shape = SegmentedButtonDefaults.itemShape(index, Kind.entries.size),
-                    ) { Text(if (kind == Kind.EXPENSE) "Wydatek" else "Przychód") }
+                    ) { Text(stringResource(if (kind == Kind.EXPENSE) R.string.kind_expense else R.string.kind_income)) }
                 }
             }
 
             OutlinedTextField(
                 value = form.amount,
                 onValueChange = { text -> vm.update { it.copy(amount = text.filter { c -> c.isDigit() || c == ',' || c == '.' }) } },
-                label = { Text("Kwota") },
+                label = { Text(stringResource(R.string.field_amount)) },
                 suffix = { Text(account?.currency ?: snapshot.defaultCurrency ?: "") },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.headlineSmall,
@@ -126,8 +131,8 @@ fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, on
             )
 
             ClickableField(
-                label = "Kategoria",
-                value = category?.fullName ?: "Bez kategorii",
+                label = stringResource(R.string.field_category),
+                value = category?.fullName ?: stringResource(R.string.no_category),
                 onClick = { pickCategory = true },
             )
 
@@ -138,7 +143,7 @@ fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, on
             )
 
             ClickableField(
-                label = "Data",
+                label = stringResource(R.string.field_date),
                 value = Format.dayHeader(form.date),
                 onClick = { pickDate = true },
                 trailing = { Icon(Icons.Outlined.CalendarToday, contentDescription = null) },
@@ -147,16 +152,18 @@ fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, on
             OutlinedTextField(
                 value = form.note,
                 onValueChange = { text -> vm.update { it.copy(note = text) } },
-                label = { Text("Notatka") },
+                label = { Text(stringResource(R.string.field_note)) },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            form.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            form.error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
 
-            Button(onClick = { vm.save(onDone) }, modifier = Modifier.fillMaxWidth()) { Text("Zapisz") }
+            Button(onClick = { vm.save(onDone) }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.action_save))
+            }
             Text(
-                "Transakcja trafi do Money na Macu przy najbliższym połączeniu, a stamtąd do iCloud.",
+                stringResource(R.string.add_footer),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -182,9 +189,9 @@ fun AddTransactionScreen(repository: Repository, vm: AddTransactionViewModel, on
                             vm.update { it.copy(date = date) }
                         }
                         pickDate = false
-                    }) { Text("OK") }
+                    }) { Text(stringResource(R.string.action_ok)) }
                 },
-                dismissButton = { TextButton(onClick = { pickDate = false }) { Text("Anuluj") } },
+                dismissButton = { TextButton(onClick = { pickDate = false }) { Text(stringResource(R.string.action_cancel)) } },
             ) { DatePicker(state) }
         }
     }
@@ -209,10 +216,10 @@ private fun AccountPicker(accounts: List<app.penny.data.Account>, selectedId: St
     val selected = accounts.firstOrNull { it.id == selectedId }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
-            value = selected?.name ?: "Wybierz konto",
+            value = selected?.name ?: stringResource(R.string.choose_account),
             onValueChange = {},
             readOnly = true,
-            label = { Text("Konto") },
+            label = { Text(stringResource(R.string.field_account)) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
         )
@@ -240,7 +247,7 @@ private fun PayeeField(value: String, suggestions: List<String>, onChange: (Stri
         OutlinedTextField(
             value = value,
             onValueChange = { onChange(it, false) },
-            label = { Text("Odbiorca / płatnik") },
+            label = { Text(stringResource(R.string.field_payee)) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
             modifier = Modifier
@@ -269,31 +276,31 @@ private fun CategoryPicker(categories: List<Category>, onPick: (String?) -> Unit
         Surface(Modifier.fillMaxSize()) {
             Column {
                 TopAppBar(
-                    title = { Text("Kategoria") },
+                    title = { Text(stringResource(R.string.field_category)) },
                     navigationIcon = {
-                        IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Wstecz") }
+                        IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back)) }
                     },
                 )
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Szukaj") },
+                    placeholder = { Text(stringResource(R.string.search)) },
                     leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 )
                 LazyColumn(Modifier.fillMaxSize().imePadding()) {
                     if (query.isBlank()) {
-                        item { ListRow("Bez kategorii", "", Modifier.clickable { onPick(null) }) }
+                        item { ListRow(stringResource(R.string.no_category), "", Modifier.clickable { onPick(null) }) }
                         if (frequent.isNotEmpty()) {
-                            item { SectionHeader("Najczęściej używane") }
+                            item { SectionHeader(stringResource(R.string.categories_frequent)) }
                             items(frequent, key = { "f-" + it.id }) { CategoryRow(it, onPick) }
                             item { HorizontalDivider() }
-                            item { SectionHeader("Wszystkie") }
+                            item { SectionHeader(stringResource(R.string.categories_all)) }
                         }
                     }
                     items(filtered, key = { it.id }) { CategoryRow(it, onPick) }
-                    if (filtered.isEmpty()) item { EmptyState("Brak pasujących kategorii") }
+                    if (filtered.isEmpty()) item { EmptyState(stringResource(R.string.categories_no_match)) }
                 }
             }
         }

@@ -1,4 +1,147 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Penny</string>
+    <string name="app_name" translatable="false">Penny</string>
+
+    <!-- Common -->
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_ok">OK</string>
+    <string name="action_back">Back</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="today">Today</string>
+    <string name="yesterday">Yesterday</string>
+    <string name="transaction">Transaction</string>
+    <plurals name="transaction_count">
+        <item quantity="one">%d transaction</item>
+        <item quantity="other">%d transactions</item>
+    </plurals>
+
+    <!-- Errors -->
+    <string name="error_unreachable">Can\'t reach the Mac. Check Wi-Fi and that the bridge is running.</string>
+    <string name="error_not_paired">Not paired with a Mac</string>
+    <string name="status_offline_cached">Mac unavailable. Showing the last downloaded data.</string>
+    <string name="status_offline">Mac unavailable. Make sure the phone is on the same Wi-Fi network.</string>
+
+    <!-- Home -->
+    <string name="tab_accounts">Accounts</string>
+    <string name="tab_recent">Recent</string>
+    <string name="action_add">Add</string>
+    <string name="accounts_empty">No data. Pull down to fetch accounts from the Mac.</string>
+    <string name="accounts_default_folder">Accounts</string>
+    <string name="accounts_closed">Closed accounts (%d)</string>
+    <string name="totals_title">Total in open accounts</string>
+    <string name="totals_investments_note">Investment accounts exclude the value of securities</string>
+    <string name="balance">Balance</string>
+    <string name="balance_cash">Cash balance</string>
+    <string name="no_transactions">No transactions</string>
+
+    <!-- Account -->
+    <string name="account">Account</string>
+    <string name="account_closed">Account closed</string>
+    <string name="add_transaction">Add transaction</string>
+
+    <!-- Transaction rows -->
+    <string name="transfer">Transfer</string>
+    <string name="transfer_to">Transfer → %s</string>
+    <string name="transfer_from">Transfer ← %s</string>
+    <string name="split_count">Split (%d)</string>
+    <string name="pending_header">Pending (%d)</string>
+    <string name="pending_waiting">Pending</string>
+    <string name="pending_rejected">Rejected</string>
+    <string name="pending_rejected_reason">Rejected: %s</string>
+    <string name="pending_waiting_to_send">Waiting to be sent</string>
+    <string name="pending_rejected_title">Transaction rejected</string>
+    <string name="pending_explainer">The transaction will be sent to Money once the phone connects to the Mac.</string>
+    <string name="pending_retry">Send again</string>
+
+    <!-- Add transaction -->
+    <string name="add_title">New transaction</string>
+    <string name="add_connect_first">Connect to the Mac first to download accounts and categories.</string>
+    <string name="add_writes_disabled">Writing is turned off in the bridge configuration on the Mac.</string>
+    <string name="kind_expense">Expense</string>
+    <string name="kind_income">Income</string>
+    <string name="field_amount">Amount</string>
+    <string name="field_account">Account</string>
+    <string name="field_category">Category</string>
+    <string name="field_payee">Payee / payer</string>
+    <string name="field_date">Date</string>
+    <string name="field_note">Note</string>
+    <string name="choose_account">Choose an account</string>
+    <string name="no_category">No category</string>
+    <string name="error_amount">Enter an amount, e.g. 12.50</string>
+    <string name="add_footer">The transaction goes to Money on the Mac the next time the phone connects, and from there to iCloud.</string>
+    <string name="search">Search</string>
+    <string name="categories_frequent">Most used</string>
+    <string name="categories_all">All</string>
+    <string name="categories_no_match">No matching categories</string>
+
+    <!-- Setup -->
+    <string name="setup_title">Connect to your Mac</string>
+    <string name="setup_intro">Penny shows your Money data through a bridge running on your Mac. The phone and the Mac must be on the same Wi-Fi network.</string>
+    <string name="setup_found">Macs found</string>
+    <string name="setup_searching">Searching the network…</string>
+    <string name="setup_change">Change</string>
+    <string name="setup_manual_title">Or enter the address manually</string>
+    <string name="setup_manual_hint">The address is shown by the “penny-bridge pair” command on the Mac.</string>
+    <string name="setup_ip">IP address</string>
+    <string name="setup_port">Port</string>
+    <string name="setup_connect">Connect</string>
+    <string name="setup_code_title">Pairing code</string>
+    <string name="setup_code_instructions">On the Mac, run in Terminal:  penny-bridge pair\nand enter the 6-digit code it shows.</string>
+    <string name="setup_code">Code</string>
+    <string name="setup_pair">Pair</string>
+
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="theme_system">System default</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_language">Language</string>
+    <string name="language_system">System default</string>
+    <string name="language_english" translatable="false">English</string>
+    <string name="language_polish" translatable="false">Polski</string>
+    <string name="settings_security">Security</string>
+    <string name="lock_title">App lock</string>
+    <string name="lock_summary">Require a PIN to open Penny</string>
+    <string name="biometric_title">Unlock with biometrics</string>
+    <string name="biometric_summary">Fingerprint or face</string>
+    <string name="biometric_unavailable">No strong biometrics set up on this device</string>
+    <string name="lock_after">Lock after</string>
+    <string name="lock_after_immediately">Immediately</string>
+    <plurals name="lock_after_minutes">
+        <item quantity="one">After %d minute</item>
+        <item quantity="other">After %d minutes</item>
+    </plurals>
+    <string name="change_pin">Change PIN</string>
+    <string name="settings_mac">Mac</string>
+    <string name="mac_not_paired">Not connected</string>
+    <string name="unpair">Disconnect from Mac</string>
+    <string name="unpair_title">Disconnect from Mac?</string>
+    <string name="unpair_text">The phone will forget its access token and downloaded data. Pending transactions are kept.</string>
+    <string name="unpair_confirm">Disconnect</string>
+    <string name="settings_about">About</string>
+    <string name="version">Version</string>
+
+    <!-- Lock -->
+    <string name="pin_enter">Enter your PIN</string>
+    <string name="pin_enter_current">Enter your current PIN</string>
+    <string name="pin_create">Choose a PIN</string>
+    <string name="pin_create_hint">4 to 8 digits</string>
+    <string name="pin_confirm">Confirm your PIN</string>
+    <string name="pin_mismatch">PINs don\'t match. Try again.</string>
+    <string name="pin_wrong">Wrong PIN</string>
+    <string name="pin_locked_out">Too many attempts. Try again in %d s.</string>
+    <string name="pin_digit_delete">Delete digit</string>
+    <string name="biometric_use">Use biometrics</string>
+    <string name="biometric_prompt_title">Unlock Penny</string>
+    <string name="biometric_confirm_title">Confirm biometric unlock</string>
+    <string name="biometric_use_pin">Use PIN</string>
+    <string name="pin_forgot">Forgot PIN?</string>
+    <string name="pin_reset_title">Reset app lock?</string>
+    <string name="pin_reset_text">Penny will disconnect from the Mac, remove downloaded data and turn the lock off. You\'ll need to pair with the Mac again. Pending transactions are kept.</string>
+    <string name="pin_reset_confirm">Reset</string>
 </resources>

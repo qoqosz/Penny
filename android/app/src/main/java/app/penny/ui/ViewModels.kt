@@ -1,12 +1,16 @@
 package app.penny.ui
 
+import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import app.penny.data.BridgeException
+import app.penny.R
 import app.penny.data.DiscoveredBridge
 import app.penny.data.Discovery
 import app.penny.data.Kind
 import app.penny.data.NewTransactionRequest
+import app.penny.data.NotPairedException
 import app.penny.data.Repository
 import app.penny.data.Transaction
 import app.penny.data.UnreachableException
@@ -27,9 +31,11 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
+/** Bridge errors carry their own message; the rest are mapped to the app's strings. */
+@Composable
 fun Throwable.userMessage(): String = when (this) {
-    is UnreachableException -> "Brak połączenia z Makiem. Sprawdź Wi-Fi i czy most działa."
-    is BridgeException -> message ?: "Błąd mostu"
+    is UnreachableException -> stringResource(R.string.error_unreachable)
+    is NotPairedException -> stringResource(R.string.error_not_paired)
     else -> message ?: toString()
 }
 
@@ -37,7 +43,7 @@ data class TransactionListState(
     val items: List<Transaction> = emptyList(),
     val total: Int = 0,
     val loading: Boolean = false,
-    val error: String? = null,
+    val error: Throwable? = null,
 ) {
     val canLoadMore get() = items.size < total
 }
@@ -76,7 +82,7 @@ class TransactionsViewModel(private val repository: Repository, private val acco
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _state.update { it.copy(loading = false, error = e.userMessage()) }
+                _state.update { it.copy(loading = false, error = e) }
             }
         }
     }
@@ -85,7 +91,7 @@ class TransactionsViewModel(private val repository: Repository, private val acco
 data class SetupState(
     val selected: DiscoveredBridge? = null,
     val busy: Boolean = false,
-    val error: String? = null,
+    val error: Throwable? = null,
 )
 
 class SetupViewModel(private val repository: Repository, discovery: Discovery) : ViewModel() {
@@ -115,7 +121,7 @@ class SetupViewModel(private val repository: Repository, discovery: Discovery) :
                 block()
                 _state.update { it.copy(busy = false) }
             } catch (e: Exception) {
-                _state.update { it.copy(busy = false, error = e.userMessage()) }
+                _state.update { it.copy(busy = false, error = e) }
             }
         }
     }
@@ -129,7 +135,7 @@ data class AddForm(
     val payee: String = "",
     val date: LocalDate = LocalDate.now(),
     val note: String = "",
-    val error: String? = null,
+    @StringRes val error: Int? = null,
 ) {
     val parsedAmount: BigDecimal? get() = Format.parseAmount(amount)
 }
@@ -167,8 +173,8 @@ class AddTransactionViewModel(private val repository: Repository, initialAccount
         val form = _form.value
         val amount = form.parsedAmount
         val error = when {
-            amount == null -> "Podaj kwotę, np. 12,50"
-            form.accountId == null -> "Wybierz konto"
+            amount == null -> R.string.error_amount
+            form.accountId == null -> R.string.choose_account
             else -> null
         }
         if (error != null) {

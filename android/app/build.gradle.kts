@@ -35,6 +35,10 @@ android {
     buildFeatures {
         compose = true
     }
+    androidResources {
+        // Lists the app's languages for the Android 13+ per-app language setting (default locale: res/resources.properties).
+        generateLocaleConfig = true
+    }
 }
 
 dependencies {
@@ -45,9 +49,12 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.9.0")
     implementation("androidx.navigation:navigation-compose:2.9.0")
     implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation("androidx.work:work-runtime-ktx:2.10.1")

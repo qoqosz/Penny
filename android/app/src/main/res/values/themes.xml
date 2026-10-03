@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Penny" parent="android:Theme.Material.Light.NoActionBar">
+    <!-- DayNight follows the theme chosen in Penny's settings (AppCompatDelegate.setDefaultNightMode). -->
+    <style name="Theme.Penny" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>

@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Common -->
+    <string name="action_cancel">Anuluj</string>
+    <string name="action_save">Zapisz</string>
+    <string name="action_ok">OK</string>
+    <string name="action_back">Wstecz</string>
+    <string name="action_delete">Usuń</string>
+    <string name="action_continue">Dalej</string>
+    <string name="action_refresh">Odśwież</string>
+    <string name="today">Dzisiaj</string>
+    <string name="yesterday">Wczoraj</string>
+    <string name="transaction">Transakcja</string>
+    <plurals name="transaction_count">
+        <item quantity="one">%d transakcja</item>
+        <item quantity="few">%d transakcje</item>
+        <item quantity="many">%d transakcji</item>
+        <item quantity="other">%d transakcji</item>
+    </plurals>
+
+    <!-- Errors -->
+    <string name="error_unreachable">Brak połączenia z Makiem. Sprawdź Wi-Fi i czy most działa.</string>
+    <string name="error_not_paired">Nie sparowano z Makiem</string>
+    <string name="status_offline_cached">Mac niedostępny. Pokazuję ostatnio pobrane dane.</string>
+    <string name="status_offline">Mac niedostępny. Sprawdź, czy telefon jest w tej samej sieci Wi-Fi.</string>
+
+    <!-- Home -->
+    <string name="tab_accounts">Konta</string>
+    <string name="tab_recent">Ostatnie</string>
+    <string name="action_add">Dodaj</string>
+    <string name="accounts_empty">Brak danych. Pociągnij w dół, aby pobrać konta z Maca.</string>
+    <string name="accounts_default_folder">Konta</string>
+    <string name="accounts_closed">Zamknięte konta (%d)</string>
+    <string name="totals_title">Razem na otwartych kontach</string>
+    <string name="totals_investments_note">Konta inwestycyjne liczone bez wartości papierów</string>
+    <string name="balance">Saldo</string>
+    <string name="balance_cash">Saldo gotówkowe</string>
+    <string name="no_transactions">Brak transakcji</string>
+
+    <!-- Account -->
+    <string name="account">Konto</string>
+    <string name="account_closed">Konto zamknięte</string>
+    <string name="add_transaction">Dodaj transakcję</string>
+
+    <!-- Transaction rows -->
+    <string name="transfer">Przelew</string>
+    <string name="transfer_to">Przelew → %s</string>
+    <string name="transfer_from">Przelew ← %s</string>
+    <string name="split_count">Podzielona (%d)</string>
+    <string name="pending_header">Oczekujące (%d)</string>
+    <string name="pending_waiting">Oczekuje</string>
+    <string name="pending_rejected">Odrzucona</string>
+    <string name="pending_rejected_reason">Odrzucona: %s</string>
+    <string name="pending_waiting_to_send">Czeka na wysłanie</string>
+    <string name="pending_rejected_title">Transakcja odrzucona</string>
+    <string name="pending_explainer">Transakcja zostanie wysłana do Money, gdy telefon połączy się z Makiem.</string>
+    <string name="pending_retry">Wyślij ponownie</string>
+
+    <!-- Add transaction -->
+    <string name="add_title">Nowa transakcja</string>
+    <string name="add_connect_first">Najpierw połącz się z Makiem, aby pobrać konta i kategorie.</string>
+    <string name="add_writes_disabled">Zapis jest wyłączony w konfiguracji mostu na Macu.</string>
+    <string name="kind_expense">Wydatek</string>
+    <string name="kind_income">Przychód</string>
+    <string name="field_amount">Kwota</string>
+    <string name="field_account">Konto</string>
+    <string name="field_category">Kategoria</string>
+    <string name="field_payee">Odbiorca / płatnik</string>
+    <string name="field_date">Data</string>
+    <string name="field_note">Notatka</string>
+    <string name="choose_account">Wybierz konto</string>
+    <string name="no_category">Bez kategorii</string>
+    <string name="error_amount">Podaj kwotę, np. 12,50</string>
+    <string name="add_footer">Transakcja trafi do Money na Macu przy najbliższym połączeniu, a stamtąd do iCloud.</string>
+    <string name="search">Szukaj</string>
+    <string name="categories_frequent">Najczęściej używane</string>
+    <string name="categories_all">Wszystkie</string>
+    <string name="categories_no_match">Brak pasujących kategorii</string>
+
+    <!-- Setup -->
+    <string name="setup_title">Połącz z Makiem</string>
+    <string name="setup_intro">Penny pokazuje dane z Money przez most uruchomiony na Twoim Macu. Telefon i Mac muszą być w tej samej sieci Wi-Fi.</string>
+    <string name="setup_found">Znalezione Maki</string>
+    <string name="setup_searching">Szukam w sieci…</string>
+    <string name="setup_change">Zmień</string>
+    <string name="setup_manual_title">Albo wpisz adres ręcznie</string>
+    <string name="setup_manual_hint">Adres pokazuje polecenie „penny-bridge pair” na Macu.</string>
+    <string name="setup_ip">Adres IP</string>
+    <string name="setup_port">Port</string>
+    <string name="setup_connect">Połącz</string>
+    <string name="setup_code_title">Kod parowania</string>
+    <string name="setup_code_instructions">Na Macu uruchom w Terminalu:  penny-bridge pair\ni wpisz pokazany 6-cyfrowy kod.</string>
+    <string name="setup_code">Kod</string>
+    <string name="setup_pair">Sparuj</string>
+
+    <!-- Settings -->
+    <string name="settings">Ustawienia</string>
+    <string name="settings_appearance">Wygląd</string>
+    <string name="settings_theme">Motyw</string>
+    <string name="theme_system">Zgodnie z systemem</string>
+    <string name="theme_light">Jasny</string>
+    <string name="theme_dark">Ciemny</string>
+    <string name="settings_language">Język</string>
+    <string name="language_system">Zgodnie z systemem</string>
+    <string name="settings_security">Bezpieczeństwo</string>
+    <string name="lock_title">Blokada aplikacji</string>
+    <string name="lock_summary">Wymagaj kodu PIN do otwarcia Penny</string>
+    <string name="biometric_title">Odblokowanie biometrią</string>
+    <string name="biometric_summary">Odcisk palca lub twarz</string>
+    <string name="biometric_unavailable">Na tym urządzeniu nie skonfigurowano silnej biometrii</string>
+    <string name="lock_after">Blokuj po</string>
+    <string name="lock_after_immediately">Natychmiast</string>
+    <plurals name="lock_after_minutes">
+        <item quantity="one">Po %d minucie</item>
+        <item quantity="few">Po %d minutach</item>
+        <item quantity="many">Po %d minutach</item>
+        <item quantity="other">Po %d minuty</item>
+    </plurals>
+    <string name="change_pin">Zmień PIN</string>
+    <string name="settings_mac">Mac</string>
+    <string name="mac_not_paired">Nie połączono</string>
+    <string name="unpair">Rozłącz z Makiem</string>
+    <string name="unpair_title">Rozłączyć z Makiem?</string>
+    <string name="unpair_text">Telefon zapomni token dostępu i dane z pamięci. Oczekujące transakcje zostaną zachowane.</string>
+    <string name="unpair_confirm">Rozłącz</string>
+    <string name="settings_about">Informacje</string>
+    <string name="version">Wersja</string>
+
+    <!-- Lock -->
+    <string name="pin_enter">Wpisz kod PIN</string>
+    <string name="pin_enter_current">Wpisz obecny kod PIN</string>
+    <string name="pin_create">Ustaw kod PIN</string>
+    <string name="pin_create_hint">Od 4 do 8 cyfr</string>
+    <string name="pin_confirm">Powtórz kod PIN</string>
+    <string name="pin_mismatch">Kody PIN się nie zgadzają. Spróbuj ponownie.</string>
+    <string name="pin_wrong">Nieprawidłowy kod PIN</string>
+    <string name="pin_locked_out">Zbyt wiele prób. Spróbuj ponownie za %d s.</string>
+    <string name="pin_digit_delete">Usuń cyfrę</string>
+    <string name="biometric_use">Użyj biometrii</string>
+    <string name="biometric_prompt_title">Odblokuj Penny</string>
+    <string name="biometric_confirm_title">Potwierdź odblokowanie biometrią</string>
+    <string name="biometric_use_pin">Użyj kodu PIN</string>
+    <string name="pin_forgot">Nie pamiętasz kodu PIN?</string>
+    <string name="pin_reset_title">Zresetować blokadę?</string>
+    <string name="pin_reset_text">Penny rozłączy się z Makiem, usunie pobrane dane i wyłączy blokadę. Trzeba będzie ponownie sparować telefon z Makiem. Oczekujące transakcje zostaną zachowane.</string>
+    <string name="pin_reset_confirm">Resetuj</string>
+</resources>

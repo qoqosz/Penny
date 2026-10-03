@@ -25,9 +25,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.penny.R
 import app.penny.data.Repository
 import app.penny.data.SyncStatus
 import kotlinx.coroutines.launch
@@ -53,10 +56,10 @@ fun AccountScreen(
         topBar = {
             Column {
                 TopAppBar(
-                    title = { Text(account?.name ?: "Konto", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    title = { Text(account?.name ?: stringResource(R.string.account), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Wstecz")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
                 )
@@ -65,7 +68,7 @@ fun AccountScreen(
         },
         floatingActionButton = {
             if (account != null && !account.closed) {
-                FloatingActionButton(onClick = onAdd) { Icon(Icons.Filled.Add, contentDescription = "Dodaj transakcję") }
+                FloatingActionButton(onClick = onAdd) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.add_transaction)) }
             }
         },
     ) { padding ->
@@ -83,7 +86,7 @@ fun AccountScreen(
                         ) {
                             Column(Modifier.padding(16.dp)) {
                                 Text(
-                                    if (account.hasInvestments) "Saldo gotówkowe" else "Saldo",
+                                    stringResource(if (account.hasInvestments) R.string.balance_cash else R.string.balance),
                                     style = MaterialTheme.typography.labelLarge,
                                 )
                                 Text(
@@ -91,7 +94,10 @@ fun AccountScreen(
                                     style = MaterialTheme.typography.headlineMedium,
                                 )
                                 Text(
-                                    "${list.total} transakcji" + if (account.closed) " · konto zamknięte" else "",
+                                    listOfNotNull(
+                                        pluralStringResource(R.plurals.transaction_count, list.total, list.total),
+                                        stringResource(R.string.account_closed).takeIf { account.closed },
+                                    ).joinToString(" · "),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }

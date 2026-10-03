@@ -33,9 +33,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.penny.R
 import app.penny.data.PendingTransaction
 import app.penny.data.Repository
 import app.penny.data.Snapshot
@@ -46,7 +48,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun StatusBanner(status: SyncStatus) {
     val (icon, text, color) = when (status) {
-        is SyncStatus.Offline -> Triple(Icons.Outlined.CloudOff, status.message, MaterialTheme.colorScheme.secondaryContainer)
+        is SyncStatus.Offline -> Triple(
+            Icons.Outlined.CloudOff,
+            stringResource(if (status.hasCachedData) R.string.status_offline_cached else R.string.status_offline),
+            MaterialTheme.colorScheme.secondaryContainer,
+        )
         is SyncStatus.Error -> Triple(Icons.Outlined.ErrorOutline, status.message, MaterialTheme.colorScheme.errorContainer)
         else -> return
     }
@@ -93,11 +99,13 @@ fun TransactionRow(tx: Transaction, snapshot: Snapshot?, showAccount: Boolean) {
     val transferTo = tx.splits.firstNotNullOfOrNull { it.transferAccountId }
         ?.let { id -> snapshot?.accounts?.firstOrNull { it.id == id }?.name }
     val category = when {
-        transferTo != null -> if (tx.amountValue.signum() < 0) "Przelew → $transferTo" else "Przelew ← $transferTo"
-        tx.splits.size > 1 -> "Podzielona (${tx.splits.size})"
+        transferTo != null -> stringResource(
+            if (tx.amountValue.signum() < 0) R.string.transfer_to else R.string.transfer_from, transferTo,
+        )
+        tx.splits.size > 1 -> stringResource(R.string.split_count, tx.splits.size)
         else -> tx.splits.firstOrNull()?.category
     }
-    val title = tx.payee?.takeIf { it.isNotBlank() } ?: category ?: tx.note ?: "Transakcja"
+    val title = tx.payee?.takeIf { it.isNotBlank() } ?: category ?: tx.note ?: stringResource(R.string.transaction)
     val subtitle = listOfNotNull(
         category.takeIf { title != category },
         accountName.takeIf { showAccount },
@@ -125,36 +133,33 @@ fun PendingRow(item: PendingTransaction, snapshot: Snapshot?, repository: Reposi
         leading = {
             Icon(
                 if (rejected) Icons.Outlined.ErrorOutline else Icons.Outlined.Schedule,
-                contentDescription = if (rejected) "Odrzucona" else "Oczekuje",
+                contentDescription = stringResource(if (rejected) R.string.pending_rejected else R.string.pending_waiting),
                 tint = if (rejected) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-        title = r.payeeName ?: category ?: r.note ?: "Transakcja",
-        subtitle = if (rejected) "Odrzucona: ${item.rejectedReason}"
-        else listOfNotNull("Czeka na wysłanie", category, account?.name).joinToString(" · "),
+        title = r.payeeName ?: category ?: r.note ?: stringResource(R.string.transaction),
+        subtitle = if (rejected) stringResource(R.string.pending_rejected_reason, item.rejectedReason.orEmpty())
+        else listOfNotNull(stringResource(R.string.pending_waiting_to_send), category, account?.name).joinToString(" · "),
         trailing = { AmountText(signed, account?.currency ?: snapshot?.defaultCurrency ?: "PLN") },
     )
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
-            title = { Text(if (rejected) "Transakcja odrzucona" else "Czeka na wysłanie") },
-            text = {
-                Text(
-                    item.rejectedReason ?: item.lastError
-                    ?: "Transakcja zostanie wysłana do Money, gdy telefon połączy się z Makiem."
-                )
+            title = {
+                Text(stringResource(if (rejected) R.string.pending_rejected_title else R.string.pending_waiting_to_send))
             },
+            text = { Text(item.rejectedReason ?: item.lastError ?: stringResource(R.string.pending_explainer)) },
             confirmButton = {
                 TextButton(onClick = {
                     showDialog = false
                     scope.launch { repository.retryPending(r.clientId) }
-                }) { Text("Wyślij ponownie") }
+                }) { Text(stringResource(R.string.pending_retry)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showDialog = false
                     scope.launch { repository.discardPending(r.clientId) }
-                }) { Text("Usuń", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
             },
         )
     }
@@ -193,7 +198,7 @@ fun ListRow(
 @Composable
 private fun KindDot(isTransfer: Boolean, positive: Boolean) {
     if (isTransfer) {
-        Icon(Icons.Outlined.SwapHoriz, contentDescription = "Przelew", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Outlined.SwapHoriz, contentDescription = stringResource(R.string.transfer), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
         Box(
             Modifier
@@ -212,7 +217,7 @@ fun LazyListScope.transactionItems(
     showAccount: Boolean,
 ) {
     if (pending.isNotEmpty()) {
-        item(key = "pending-header") { SectionHeader("Oczekujące (${pending.size})") }
+        item(key = "pending-header") { SectionHeader(stringResource(R.string.pending_header, pending.size)) }
         items(pending, key = { "p-" + it.request.clientId }) { PendingRow(it, snapshot, repository) }
     }
     transactions.groupBy { Format.localDate(it.instant) }.forEach { (day, dayItems) ->

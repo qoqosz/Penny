@@ -1,49 +1,49 @@
 # Penny
 
-Aplikacja na Androida do przeglądania i dodawania transakcji w **Money** (Jumsoft) z synchronizacją przez iCloud.
+An Android app for viewing and adding transactions in **Money** (Jumsoft), synced through iCloud.
 
-## Jak to działa
+## How it works
 
-Money trzyma dane w prywatnej bazie **CloudKit** (`iCloud.com.jumsoft.money`), a nie jako plik na iCloud Drive.
-Apple nie udostępnia tej bazy aplikacjom spoza ekosystemu, więc Android nie może jej czytać bezpośrednio.
-Penny korzysta z Maca jako mostu:
+Money keeps its data in a private **CloudKit** database (`iCloud.com.jumsoft.money`), not as a file on iCloud Drive.
+Apple doesn't open that database to apps outside its ecosystem, so Android can't read it directly.
+Penny uses a Mac as a bridge:
 
 ```
-Android (Penny) ⇄ Wi-Fi ⇄ penny-bridge (Mac) ⇄ lokalna baza Money ⇄ Money.app ⇄ iCloud ⇄ iPhone/iPad
+Android (Penny) ⇄ Wi-Fi ⇄ penny-bridge (Mac) ⇄ local Money database ⇄ Money.app ⇄ iCloud ⇄ iPhone/iPad
 ```
 
-- **Odczyt:** `penny-bridge` czyta lokalną bazę Money (Core Data/SQLite) przez model danych wczytany wprost z Money.app.
-- **Zapis:** most zamyka Money, robi kopię zapasową, dopisuje transakcję do bazy Money i rejestruje ją w dzienniku
-  zmian SyncKit (stan „new”), tak jak robi to sam Money. Potem uruchamia Money w tle. Money wysyła transakcję
-  do iCloud przy najbliższej synchronizacji, a stamtąd trafia ona na pozostałe urządzenia.
-- Nowe transakcje kopiują pola techniczne (`transactionType`, typ splitu, flagi) z ostatniej podobnej transakcji
-  zapisanej przez Money, więc wyglądają tak samo jak wprowadzone ręcznie.
-- Telefon trzyma kolejkę offline: transakcje dodane poza domem czekają i wysyłają się po powrocie do sieci Wi-Fi.
+- **Reading:** `penny-bridge` reads Money's local database (Core Data/SQLite) using the data model loaded straight from Money.app.
+- **Writing:** the bridge quits Money, makes a backup, adds the transaction to Money's database and registers it in the
+  SyncKit change log (state "new"), the same way Money does. Then it relaunches Money in the background. Money uploads
+  the transaction to iCloud on its next sync, and from there it reaches your other devices.
+- New transactions copy their technical fields (`transactionType`, split type, flags) from the most recent similar
+  transaction saved by Money, so they look the same as ones entered by hand.
+- The phone keeps an offline queue: transactions added away from home wait and are sent once you're back on Wi-Fi.
 
-## Instalacja na Macu
+## Installing on the Mac
 
-Wymagania: macOS 14+, Money 9 z włączoną synchronizacją iCloud, Xcode Command Line Tools.
+Requirements: macOS 14+, Money 9 with iCloud sync turned on, Xcode Command Line Tools.
 
 ```bash
 cd bridge
 swift build -c release
-.build/release/penny-bridge selftest     # test na sztucznej bazie, nie dotyka danych Money
-.build/release/penny-bridge install      # instaluje usługę uruchamianą przy logowaniu
+.build/release/penny-bridge selftest     # test on a throwaway database, never touches Money's data
+.build/release/penny-bridge install      # installs a service that starts at login
 ```
 
-Następnie:
+Then:
 
-1. Ustawienia systemowe → Prywatność i ochrona → **Pełny dostęp do dysku** → „+” → `Cmd+Shift+G` →
-   `~/Library/Application Support/PennyBridge/bin/penny-bridge`. Dostęp trzeba nadać ponownie po każdej
-   reinstalacji, bo macOS rozpoznaje program po podpisie.
-2. Zrestartuj usługę: `launchctl kickstart -k gui/$(id -u)/app.penny.bridge`
-3. Sprawdź: `~/Library/Application\ Support/PennyBridge/bin/penny-bridge doctor`
-4. Jeśli macOS zapyta o połączenia przychodzące lub sieć lokalną, zezwól.
+1. System Settings → Privacy & Security → **Full Disk Access** → "+" → `Cmd+Shift+G` →
+   `~/Library/Application Support/PennyBridge/bin/penny-bridge`. Access has to be granted again after every
+   reinstall, because macOS identifies the program by its signature.
+2. Restart the service: `launchctl kickstart -k gui/$(id -u)/app.penny.bridge`
+3. Check: `~/Library/Application\ Support/PennyBridge/bin/penny-bridge doctor`
+4. If macOS asks about incoming connections or local network access, allow it.
 
-Log usługi: `~/Library/Logs/PennyBridge.log`. Kopie zapasowe bazy przed każdym zapisem:
-`~/Library/Application Support/PennyBridge/backups/` (ostatnie 30).
+Service log: `~/Library/Logs/PennyBridge.log`. Database backups taken before every write:
+`~/Library/Application Support/PennyBridge/backups/` (the last 30).
 
-## Instalacja na Androidzie
+## Installing on Android
 
 ```bash
 cd android
@@ -51,36 +51,51 @@ cd android
 adb install app/build/outputs/apk/release/app-release.apk
 ```
 
-Przy pierwszym uruchomieniu Penny szuka Maca w sieci (Bonjour). Po wybraniu Maca uruchom na nim
-`penny-bridge pair` i wpisz w telefonie pokazany 6-cyfrowy kod.
+On first launch Penny looks for the Mac on the network (Bonjour). After choosing the Mac, run
+`penny-bridge pair` on it and enter the 6-digit code it shows on the phone.
 
-## Polecenia mostu
+### App settings
 
-| Polecenie | Opis |
+The settings screen (gear icon on the main screen) offers:
+
+- **Theme:** system default, light or dark.
+- **Language:** system default, English or Polish. On Android 13+ the language can also be changed in the system
+  settings (Apps → Penny → Language).
+- **App lock:** a 4–8 digit PIN required to open Penny, optionally with biometric unlock (fingerprint/face, Class 3
+  only). The app locks on start and after being in the background for the chosen time. After 5 wrong PINs, entry is
+  blocked for a while, and the delay grows with further mistakes. A forgotten PIN can be reset, which disconnects the
+  phone from the Mac and removes downloaded data (pending transactions are kept).
+- **Mac:** the connected bridge and disconnecting from it.
+
+## Bridge commands
+
+| Command | Description |
 |---|---|
-| `penny-bridge pair` | kod parowania telefonu (ważny 10 min) |
-| `penny-bridge doctor [--verbose]` | diagnostyka: lokalizacja baz, rozpoznane konwencje, salda |
-| `penny-bridge devices` / `revoke NAZWA` | sparowane urządzenia |
-| `penny-bridge install` / `uninstall` | usługa LaunchAgent |
-| `penny-bridge selftest` | test zapisu na sztucznej bazie zbudowanej z modelu Money |
+| `penny-bridge pair` | phone pairing code (valid for 10 min) |
+| `penny-bridge doctor [--verbose]` | diagnostics: database locations, detected conventions, balances |
+| `penny-bridge devices` / `revoke NAME` | paired devices |
+| `penny-bridge install` / `uninstall` | LaunchAgent service |
+| `penny-bridge selftest` | write test on a throwaway database built from Money's model |
 
-Konfiguracja: `~/Library/Application Support/PennyBridge/config.json`, m.in. `port`, `writesEnabled`
-(wyłącza zapis) i `launchMoneyAfterWrite`.
+Configuration: `~/Library/Application Support/PennyBridge/config.json`, including `port`, `writesEnabled`
+(turns writing off) and `launchMoneyAfterWrite`.
 
-## Ograniczenia
+## Limitations
 
-- Mac musi być włączony i w tej samej sieci, żeby telefon pobrał świeże dane lub wysłał transakcje.
-- Ruch w sieci lokalnej jest nieszyfrowany (HTTP + token). Używaj w zaufanej sieci domowej.
-- Zapis zamyka Money na kilka sekund. Gdy Money jest na pierwszym planie (właśnie go używasz) albo ma otwarte
-  okno edycji, most odkłada zapis, a telefon ponawia wysyłkę później. Można to wyłączyć opcją
+- The Mac has to be on and on the same network for the phone to fetch fresh data or send transactions.
+- Local network traffic is unencrypted (HTTP + token). Use it on a trusted home network.
+- Writing closes Money for a few seconds. When Money is frontmost (you're using it right now) or has an edit window
+  open, the bridge defers the write and the phone retries later. This can be turned off with
   `deferWhileMoneyActive: false`.
-- Obsługiwane są wydatki i przychody z jedną kategorią. Przelewy między kontami, transakcje dzielone
-  i edycja istniejących transakcji jeszcze nie działają.
-- Saldo kont inwestycyjnych to tylko saldo gotówkowe, bez wycenianych papierów.
-- Format danych Money nie jest udokumentowany. Most sprawdza zgodność modelu z zainstalowaną wersją Money i odmawia
-  zapisu, jeśli nie rozpozna formatu. Po aktualizacji Money warto uruchomić `penny-bridge doctor`.
+- Only expenses and income with a single category are supported. Transfers between accounts, split transactions
+  and editing existing transactions don't work yet.
+- The balance of investment accounts is the cash balance only, without the value of securities.
+- Error messages coming from the bridge (e.g. a rejected transaction) are in Polish, whatever the app language.
+- Money's data format isn't documented. The bridge checks that the model matches the installed Money version and refuses
+  to write if it doesn't recognize the format. After updating Money, it's worth running `penny-bridge doctor`.
 
-## Struktura
+## Structure
 
-- `bridge/`: Swift, bez zależności (Core Data, SQLite, Network.framework).
-- `android/`: Kotlin, Jetpack Compose, Material 3, OkHttp, kotlinx.serialization, WorkManager.
+- `bridge/`: Swift, no dependencies (Core Data, SQLite, Network.framework).
+- `android/`: Kotlin, Jetpack Compose, Material 3, OkHttp, kotlinx.serialization, WorkManager, AppCompat (per-app
+  language and theme), androidx.biometric.

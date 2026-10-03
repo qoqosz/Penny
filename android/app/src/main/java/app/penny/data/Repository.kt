@@ -13,7 +13,8 @@ import java.util.UUID
 sealed interface SyncStatus {
     data object Idle : SyncStatus
     data object Syncing : SyncStatus
-    data class Offline(val message: String) : SyncStatus
+    data class Offline(val hasCachedData: Boolean) : SyncStatus
+    /** [message] comes from the bridge. */
     data class Error(val message: String) : SyncStatus
 }
 
@@ -79,12 +80,9 @@ class Repository(
             SyncStatus.Idle
         } catch (e: UnreachableException) {
             if (_state.value.pending.isNotEmpty()) scheduleSync()
-            SyncStatus.Offline(
-                if (_state.value.snapshot != null) "Mac niedostępny — pokazuję ostatnio pobrane dane"
-                else "Mac niedostępny. Sprawdź, czy telefon jest w tej samej sieci Wi-Fi."
-            )
+            SyncStatus.Offline(hasCachedData = _state.value.snapshot != null)
         } catch (e: BridgeException) {
-            SyncStatus.Error(e.message ?: "Błąd")
+            SyncStatus.Error(e.message.orEmpty())
         }
         _state.update { it.copy(status = status, pending = queue.all()) }
     }
@@ -118,7 +116,7 @@ class Repository(
 
     suspend fun transactions(accountId: String?, offset: Int, limit: Int = PAGE_SIZE): TransactionPage {
         val file = "tx_${accountId ?: "all"}.json"
-        val bridge = settings.current() ?: throw IllegalStateException("Nie sparowano z Makiem")
+        val bridge = settings.current() ?: throw NotPairedException()
         return try {
             val page = withReconnect(bridge) { client.transactions(it, accountId, offset, limit) }
             if (offset == 0) cache.write(file, TransactionPage.serializer(), page)
