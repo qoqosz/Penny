@@ -4,10 +4,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -58,6 +60,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
 import app.penny.data.Category
+import app.penny.data.HiddenAccounts
+import app.penny.data.IconStore
+import app.penny.data.Payee
 import app.penny.data.Kind
 import app.penny.data.Repository
 import kotlinx.coroutines.flow.StateFlow
@@ -68,12 +73,12 @@ import java.time.ZoneOffset
 @Composable
 fun AddTransactionScreen(
     repository: Repository,
-    hiddenFolders: StateFlow<Set<String>>,
+    hiddenAccounts: StateFlow<HiddenAccounts>,
     vm: AddTransactionViewModel,
     onDone: () -> Unit,
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
-    val hidden by hiddenFolders.collectAsStateWithLifecycle()
+    val hidden by hiddenAccounts.collectAsStateWithLifecycle()
     val form by vm.form.collectAsStateWithLifecycle()
     val snapshot = app.snapshot
     var pickCategory by rememberSaveable { mutableStateOf(false) }
@@ -146,7 +151,8 @@ fun AddTransactionScreen(
 
             PayeeField(
                 value = form.payee,
-                suggestions = snapshot.payees.map { it.name },
+                suggestions = snapshot.payees,
+                icons = repository.icons,
                 onChange = { text, fromSuggestion -> vm.setPayee(text, fromSuggestion) },
             )
 
@@ -180,6 +186,7 @@ fun AddTransactionScreen(
         if (pickCategory) {
             CategoryPicker(
                 categories = snapshot.categories.filter { it.kind == form.kind.api },
+                icons = repository.icons,
                 onPick = { id -> vm.update { it.copy(categoryId = id) }; pickCategory = false },
                 onDismiss = { pickCategory = false },
             )
@@ -245,11 +252,11 @@ private fun AccountPicker(accounts: List<app.penny.data.Account>, selectedId: St
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PayeeField(value: String, suggestions: List<String>, onChange: (String, Boolean) -> Unit) {
+private fun PayeeField(value: String, suggestions: List<Payee>, icons: IconStore, onChange: (String, Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val matches = remember(value, suggestions) {
         if (value.length < 2) emptyList()
-        else suggestions.filter { it.contains(value, ignoreCase = true) && !it.equals(value, ignoreCase = true) }.take(6)
+        else suggestions.filter { it.name.contains(value, ignoreCase = true) && !it.name.equals(value, ignoreCase = true) }.take(6)
     }
     ExposedDropdownMenuBox(expanded = focused && matches.isNotEmpty(), onExpandedChange = {}) {
         OutlinedTextField(
@@ -264,8 +271,17 @@ private fun PayeeField(value: String, suggestions: List<String>, onChange: (Stri
                 .onFocusChanged { focused = it.isFocused },
         )
         ExposedDropdownMenu(expanded = focused && matches.isNotEmpty(), onDismissRequest = { focused = false }) {
-            matches.forEach { name ->
-                DropdownMenuItem(text = { Text(name) }, onClick = { onChange(name, true) })
+            // Names stay aligned when only some payees have a logo.
+            val withLogos = matches.any { it.iconId != null }
+            matches.forEach { payee ->
+                val logo = rememberMoneyIcon(icons, payee.iconId)
+                DropdownMenuItem(
+                    text = { Text(payee.name) },
+                    onClick = { onChange(payee.name, true) },
+                    leadingIcon = if (!withLogos) null else {
+                        { if (logo != null) PayeeLogo(logo, size = 24.dp) else Spacer(Modifier.size(24.dp)) }
+                    },
+                )
             }
         }
     }
@@ -273,7 +289,7 @@ private fun PayeeField(value: String, suggestions: List<String>, onChange: (Stri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CategoryPicker(categories: List<Category>, onPick: (String?) -> Unit, onDismiss: () -> Unit) {
+private fun CategoryPicker(categories: List<Category>, icons: IconStore, onPick: (String?) -> Unit, onDismiss: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     val filtered = remember(query, categories) {
         if (query.isBlank()) categories else categories.filter { it.fullName.contains(query.trim(), ignoreCase = true) }
@@ -302,12 +318,12 @@ private fun CategoryPicker(categories: List<Category>, onPick: (String?) -> Unit
                         item { ListRow(stringResource(R.string.no_category), "", Modifier.clickable { onPick(null) }) }
                         if (frequent.isNotEmpty()) {
                             item { SectionHeader(stringResource(R.string.categories_frequent)) }
-                            items(frequent, key = { "f-" + it.id }) { CategoryRow(it, onPick) }
+                            items(frequent, key = { "f-" + it.id }) { CategoryRow(it, icons, onPick) }
                             item { HorizontalDivider() }
                             item { SectionHeader(stringResource(R.string.categories_all)) }
                         }
                     }
-                    items(filtered, key = { it.id }) { CategoryRow(it, onPick) }
+                    items(filtered, key = { it.id }) { CategoryRow(it, icons, onPick) }
                     if (filtered.isEmpty()) item { EmptyState(stringResource(R.string.categories_no_match)) }
                 }
             }
@@ -316,9 +332,11 @@ private fun CategoryPicker(categories: List<Category>, onPick: (String?) -> Unit
 }
 
 @Composable
-private fun CategoryRow(category: Category, onPick: (String?) -> Unit) {
+private fun CategoryRow(category: Category, icons: IconStore, onPick: (String?) -> Unit) {
     val parent = category.fullName.substringBeforeLast(" › ", "")
+    val glyph = rememberMoneyIcon(icons, category.iconId)
     ListRow(
+        leading = { glyph?.let { CategoryGlyph(it) } },
         title = category.name,
         subtitle = parent,
         modifier = Modifier.clickable { onPick(category.id) },

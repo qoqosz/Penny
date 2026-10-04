@@ -31,6 +31,7 @@ final class API {
     private var model: NSManagedObjectModel?
     private var syncModel: NSManagedObjectModel?
     private var snapshot: MoneySnapshot?
+    private let iconRenderer = IconRenderer()
 
     init(config: BridgeConfig, serviceName: String, location: MoneyLocation? = nil, controlsMoneyApp: Bool = true) {
         self.config = config
@@ -84,6 +85,18 @@ final class API {
             let limit = min(1000, max(1, Int(request.query["limit"] ?? "") ?? 200))
             let page = Array(items.dropFirst(offset).prefix(limit))
             return try .json(TransactionPageDTO(generation: snapshot.generation, total: items.count, offset: offset, items: page))
+        case ("GET", "/api/v1/icons"):
+            let ids = (request.query["ids"] ?? "").split(separator: ",").map(String.init)
+            guard ids.count <= IconRenderer.maxPerRequest else {
+                throw BridgeError.badRequest("Za dużo ikon naraz (maks. \(IconRenderer.maxPerRequest)).",
+                                             en: "Too many icons at once (max \(IconRenderer.maxPerRequest)).")
+            }
+            let (location, model, _) = try ensureSetup()
+            let snapshot = try currentSnapshot()
+            let icons = try iconRenderer.icons(ids, sources: snapshot.iconSources, appURL: location.appURL) {
+                try CoreDataStore(model: model, url: location.storeURL, readOnly: true)
+            }
+            return try .json(IconsDTO(icons: icons))
         case ("POST", "/api/v1/transactions"):
             let body = try decode(NewTransactionRequest.self, request.body)
             let id = try createTransaction(body)
@@ -119,7 +132,7 @@ final class API {
         let generation = MoneyLocator.generation(of: location.storeURL)
         if let snapshot, snapshot.generation == generation { return snapshot }
         let started = Date()
-        let fresh = try MoneyReader.read(model: model, storeURL: location.storeURL)
+        let fresh = try MoneyReader.read(model: model, storeURL: location.storeURL, moneyVersion: location.moneyVersion)
         Log.info("Loaded Money data: \(fresh.accounts.count) accounts, \(fresh.transactions.count) transactions "
             + "(\(Int(Date().timeIntervalSince(started) * 1000)) ms)")
         snapshot = fresh

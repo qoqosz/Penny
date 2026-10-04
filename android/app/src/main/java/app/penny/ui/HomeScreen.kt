@@ -13,13 +13,13 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.ShowChart
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
 import app.penny.data.Account
+import app.penny.data.HiddenAccounts
 import app.penny.data.Repository
 import app.penny.data.SyncStatus
 import kotlinx.coroutines.flow.StateFlow
@@ -63,13 +64,14 @@ import java.math.BigDecimal
 fun HomeScreen(
     repository: Repository,
     recent: TransactionsViewModel,
-    hiddenFolders: StateFlow<Set<String>>,
+    hiddenAccounts: StateFlow<HiddenAccounts>,
     onOpenAccount: (String) -> Unit,
     onAdd: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenHiddenAccounts: () -> Unit,
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
-    val hidden by hiddenFolders.collectAsStateWithLifecycle()
+    val hidden by hiddenAccounts.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(0) }
     val syncing = app.status == SyncStatus.Syncing
@@ -115,7 +117,7 @@ fun HomeScreen(
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
             when (tab) {
-                0 -> AccountsList(app.snapshot?.accounts, hidden, app.status, onOpenAccount, onOpenSettings)
+                0 -> AccountsList(app.snapshot?.accounts, hidden, app.status, onOpenAccount, onOpenHiddenAccounts)
                 else -> RecentList(repository, recent)
             }
         }
@@ -125,13 +127,13 @@ fun HomeScreen(
 @Composable
 private fun AccountsList(
     allAccounts: List<Account>?,
-    hiddenFolders: Set<String>,
+    hidden: HiddenAccounts,
     status: SyncStatus,
     onOpen: (String) -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenHiddenAccounts: () -> Unit,
 ) {
     var showClosed by rememberSaveable { mutableStateOf(false) }
-    val accounts = allAccounts?.filterNot { it.isHidden(hiddenFolders) }
+    val accounts = allAccounts?.filterNot { it.isHidden(hidden) }
     if (accounts == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (status == SyncStatus.Syncing) CircularProgressIndicator()
@@ -166,7 +168,7 @@ private fun AccountsList(
         }
         if (hiddenCount > 0) {
             item(key = "hidden") {
-                TextButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                TextButton(onClick = onOpenHiddenAccounts, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
                     Text(pluralStringResource(R.plurals.accounts_hidden, hiddenCount, hiddenCount))
                 }
             }
@@ -205,7 +207,7 @@ private fun AccountRow(account: Account, onOpen: (String) -> Unit) {
         modifier = Modifier.clickable { onOpen(account.id) },
         leading = {
             Icon(
-                if (account.hasInvestments) Icons.Outlined.ShowChart else Icons.Outlined.AccountBalance,
+                if (account.hasInvestments) Icons.AutoMirrored.Outlined.ShowChart else Icons.Outlined.AccountBalance,
                 contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },

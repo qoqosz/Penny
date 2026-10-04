@@ -103,9 +103,18 @@
     <string name="settings_language">Język</string>
     <string name="language_system">Zgodnie z systemem</string>
     <string name="settings_accounts">Konta</string>
-    <string name="hidden_folders_summary">Ukryj zaznaczone foldery. Ich konta nie będą widoczne na ekranie głównym, w sumach ani przy dodawaniu transakcji.</string>
-    <string name="hidden_folders_empty">Foldery z Money pojawią się tutaj po pobraniu kont z Maca.</string>
-    <string name="hidden_folders_old_bridge">Aby ukrywać foldery, zaktualizuj Penny Bridge na Macu (penny-bridge install), a potem odśwież.</string>
+    <string name="hidden_accounts">Ukryte konta</string>
+    <string name="hidden_accounts_none">Wszystkie konta są widoczne</string>
+    <plurals name="hidden_accounts_count">
+        <item quantity="one">%d konto ukryte</item>
+        <item quantity="few">%d konta ukryte</item>
+        <item quantity="many">%d kont ukrytych</item>
+        <item quantity="other">%d konta ukrytego</item>
+    </plurals>
+    <string name="hidden_accounts_summary">Ukryte konta nie są widoczne na ekranie głównym, w sumach ani przy dodawaniu transakcji. Ukrycie folderu ukrywa też konta dodane do niego później.</string>
+    <string name="hidden_accounts_empty">Konta pojawią się tutaj po pobraniu ich z Maca.</string>
+    <string name="hidden_folders_old_bridge">Aby ukrywać całe foldery, zaktualizuj Penny Bridge na Macu (penny-bridge install), a potem odśwież.</string>
+    <string name="hidden_with_folder">Ukryte razem z folderem</string>
     <plurals name="account_count">
         <item quantity="one">%d konto</item>
         <item quantity="few">%d konta</item>

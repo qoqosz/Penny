@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.penny.R
+import app.penny.data.IconStore
 import app.penny.data.PendingTransaction
 import app.penny.data.Repository
 import app.penny.data.Snapshot
@@ -94,7 +95,7 @@ fun AmountText(amount: String, currency: String, style: androidx.compose.ui.text
 }
 
 @Composable
-fun TransactionRow(tx: Transaction, snapshot: Snapshot?, showAccount: Boolean) {
+fun TransactionRow(tx: Transaction, snapshot: Snapshot?, icons: IconStore, showAccount: Boolean) {
     val accountName = snapshot?.accounts?.firstOrNull { it.id == tx.accountId }?.name
     val transferTo = tx.splits.firstNotNullOfOrNull { it.transferAccountId }
         ?.let { id -> snapshot?.accounts?.firstOrNull { it.id == id }?.name }
@@ -111,8 +112,21 @@ fun TransactionRow(tx: Transaction, snapshot: Snapshot?, showAccount: Boolean) {
         accountName.takeIf { showAccount },
         tx.note.takeIf { !it.isNullOrBlank() && title != it },
     ).joinToString(" · ")
+    // Like Money: the payee's logo, else the category's icon.
+    val logo = rememberMoneyIcon(icons, snapshot?.payee(tx.payeeId)?.iconId)
+    val glyph = rememberMoneyIcon(icons, snapshot?.category(tx.splits.singleOrNull()?.categoryId)?.iconId)
     ListRow(
-        leading = { KindDot(isTransfer = transferTo != null, positive = tx.amountValue.signum() > 0) },
+        leading = {
+            when {
+                logo != null -> PayeeLogo(logo)
+                transferTo != null -> Icon(
+                    Icons.Outlined.SwapHoriz, contentDescription = stringResource(R.string.transfer),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                glyph != null -> CategoryGlyph(glyph)
+                else -> KindDot(positive = tx.amountValue.signum() > 0)
+            }
+        },
         title = title,
         subtitle = subtitle,
         trailing = { AmountText(tx.amount, tx.currency) },
@@ -179,7 +193,7 @@ fun ListRow(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) { leading() }
+        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { leading() }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -196,16 +210,12 @@ fun ListRow(
 }
 
 @Composable
-private fun KindDot(isTransfer: Boolean, positive: Boolean) {
-    if (isTransfer) {
-        Icon(Icons.Outlined.SwapHoriz, contentDescription = stringResource(R.string.transfer), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-    } else {
-        Box(
-            Modifier
-                .size(10.dp)
-                .background(if (positive) AmountColors.income else MaterialTheme.colorScheme.outlineVariant, CircleShape)
-        )
-    }
+private fun KindDot(positive: Boolean) {
+    Box(
+        Modifier
+            .size(10.dp)
+            .background(if (positive) AmountColors.income else MaterialTheme.colorScheme.outlineVariant, CircleShape)
+    )
 }
 
 /** Pending transactions first, then confirmed ones grouped by day. */
@@ -222,7 +232,7 @@ fun LazyListScope.transactionItems(
     }
     transactions.groupBy { Format.localDate(it.instant) }.forEach { (day, dayItems) ->
         item(key = "d-$day") { SectionHeader(Format.dayHeader(day)) }
-        items(dayItems, key = { "t-" + it.id }) { TransactionRow(it, snapshot, showAccount) }
+        items(dayItems, key = { "t-" + it.id }) { TransactionRow(it, snapshot, repository.icons, showAccount) }
     }
 }
 

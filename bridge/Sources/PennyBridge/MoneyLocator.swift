@@ -7,6 +7,9 @@ struct MoneyLocation {
     let storeURL: URL
     /// SyncKit change-tracking store. Without it writes would never reach iCloud, so they are refused.
     let syncStoreURL: URL?
+
+    /// Money.app's build number.
+    var moneyVersion: String { Bundle(url: appURL)?.infoDictionary?["CFBundleVersion"] as? String ?? "?" }
 }
 
 enum MoneyLocator {

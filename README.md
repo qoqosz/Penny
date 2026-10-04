@@ -25,6 +25,9 @@ Android (Penny) ⇄ Wi-Fi ⇄ penny-bridge (Mac) ⇄ local Money database ⇄ Mo
 - New transactions copy their technical fields (`transactionType`, split type, flags) from the most recent similar
   transaction saved by Money, so they look the same as ones entered by hand.
 - The phone keeps an offline queue: transactions added away from home wait and are sent once you're back on Wi-Fi.
+- **Icons:** transactions show the payee's logo from Money, or else the category's icon (Money's built-in glyphs,
+  taken from Money.app). The phone downloads them once and keeps them for offline use. Icons only go one way: nothing
+  the phone adds carries an icon, and a payee created from the phone has none until you give it one in Money.
 
 ## Installing on the Mac
 
@@ -65,9 +68,10 @@ On first launch Penny looks for the Mac on the network (Bonjour). After choosing
 The settings screen (gear icon on the main screen) offers:
 
 - **Theme:** system default, light or dark.
-- **Accounts:** hide chosen Money folders (e.g. an archive folder). Their accounts disappear from the main screen,
-  the totals and the account picker. Hiding follows the folder, so renaming it in Money doesn't matter. This needs
-  a bridge that sends folder IDs; with an older one, settings asks to update it.
+- **Hidden accounts:** hide single accounts or whole Money folders (e.g. an archive folder). They disappear from the
+  main screen, the totals and the account picker. A hidden folder also hides accounts added to it later, and renaming
+  it in Money doesn't matter. Hiding folders needs a bridge that sends folder IDs; with an older one, the screen asks
+  to update it.
 - **Language:** system default, English or Polish. On Android 13+ the language can also be changed in the system
   settings (Apps → Penny → Language).
 - **App lock:** a 4–8 digit PIN required to open Penny, optionally with biometric unlock (fingerprint/face, Class 3

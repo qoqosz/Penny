@@ -79,9 +79,11 @@ enum Commands {
         }
 
         let model = try ModelLoader.load(location.modelURL)
-        let snapshot = try MoneyReader.read(model: model, storeURL: location.storeURL)
+        let snapshot = try MoneyReader.read(model: model, storeURL: location.storeURL, moneyVersion: location.moneyVersion)
         print("✓ Read: \(snapshot.accounts.count) accounts, \(snapshot.categories.count) categories, "
             + "\(snapshot.payees.count) payees, \(snapshot.transactions.count) transactions")
+        print("  Icons: \(snapshot.payees.filter { $0.iconId != nil }.count) payees, "
+            + "\(snapshot.categories.filter { $0.iconId != nil }.count) categories")
         print("  Identifier format: \(snapshot.idStyle.rawValue)")
         let kinds = Dictionary(grouping: snapshot.categories, by: \.kind).mapValues(\.count)
         print("  Categories: \(kinds.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")

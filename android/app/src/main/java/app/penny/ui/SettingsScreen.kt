@@ -15,7 +15,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,7 +45,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
-import app.penny.data.Account
 import app.penny.data.AppLanguage
 import app.penny.data.AppPreferences
 import app.penny.data.Repository
@@ -69,11 +67,12 @@ fun SettingsScreen(
     repository: Repository,
     onBack: () -> Unit,
     onUnpaired: () -> Unit,
+    onOpenHiddenAccounts: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val theme by preferences.theme.collectAsStateWithLifecycle()
-    val hiddenFolders by preferences.hiddenFolders.collectAsStateWithLifecycle()
+    val hidden by preferences.hidden.collectAsStateWithLifecycle()
     val appState by repository.state.collectAsStateWithLifecycle()
     val lockConfig by lock.config.collectAsStateWithLifecycle()
     val bridge by settings.bridge.collectAsStateWithLifecycle(initialValue = null)
@@ -132,7 +131,17 @@ fun SettingsScreen(
 
             HorizontalDivider(Modifier.padding(top = 8.dp))
             SectionHeader(stringResource(R.string.settings_accounts))
-            HiddenFolders(appState.snapshot?.accounts, hiddenFolders, preferences::setFolderHidden)
+            val accounts = appState.snapshot?.accounts
+            val hiddenCount = accounts.orEmpty().count { it.isHidden(hidden) }
+            SettingRow(
+                title = stringResource(R.string.hidden_accounts),
+                subtitle = when {
+                    accounts == null -> null
+                    hiddenCount == 0 -> stringResource(R.string.hidden_accounts_none)
+                    else -> pluralStringResource(R.plurals.hidden_accounts_count, hiddenCount, hiddenCount)
+                },
+                onClick = onOpenHiddenAccounts,
+            )
 
             HorizontalDivider(Modifier.padding(top = 8.dp))
             SectionHeader(stringResource(R.string.settings_security))
@@ -276,39 +285,6 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { confirmUnpair = false }) { Text(stringResource(R.string.action_cancel)) }
             },
-        )
-    }
-}
-
-/** One checkbox per Money folder, in the order the home screen shows them. */
-@Composable
-private fun HiddenFolders(
-    accounts: List<Account>?,
-    hidden: Set<String>,
-    onChange: (folderId: String, hidden: Boolean) -> Unit,
-) {
-    val folders = accounts.orEmpty().filter { it.folderId != null }.groupBy { it.folderId!! }
-    // Bridges before folder IDs send only folder names, which can't be used to hide anything.
-    val oldBridge = folders.isEmpty() && accounts.orEmpty().any { it.folder != null }
-    Text(
-        stringResource(
-            when {
-                oldBridge -> R.string.hidden_folders_old_bridge
-                folders.isEmpty() -> R.string.hidden_folders_empty
-                else -> R.string.hidden_folders_summary
-            }
-        ),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-    )
-    folders.forEach { (id, folderAccounts) ->
-        val isHidden = id in hidden
-        SettingRow(
-            title = folderAccounts.first().folder.orEmpty(),
-            subtitle = pluralStringResource(R.plurals.account_count, folderAccounts.size, folderAccounts.size),
-            onClick = { onChange(id, !isHidden) },
-            trailing = { Checkbox(checked = isHidden, onCheckedChange = null) },
         )
     }
 }

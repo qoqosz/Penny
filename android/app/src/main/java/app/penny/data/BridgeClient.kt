@@ -51,6 +51,11 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
         return call(url, c.token, null)
     }
 
+    suspend fun icons(c: Connection, ids: List<String>): IconBatch {
+        val url = url(c.host, c.port, "icons").newBuilder().addQueryParameter("ids", ids.joinToString(",")).build()
+        return call(url, c.token, null)
+    }
+
     suspend fun create(c: Connection, request: NewTransactionRequest): Transaction =
         call(url(c.host, c.port, "transactions"), c.token,
             json.encodeToString(NewTransactionRequest.serializer(), request))

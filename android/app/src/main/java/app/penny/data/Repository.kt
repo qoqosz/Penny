@@ -32,6 +32,7 @@ class Repository(
     private val discovery: Discovery,
     private val cache: JsonStore,
     private val queue: PendingQueue,
+    val icons: IconStore,
     private val scope: CoroutineScope,
     /** Schedules a background sync (WorkManager) for when the network is back. */
     private val scheduleSync: () -> Unit,
@@ -45,6 +46,7 @@ class Repository(
         scope.launch {
             val cached = cache.read(SNAPSHOT_FILE, Snapshot.serializer())
             _state.update { it.copy(snapshot = it.snapshot ?: cached, pending = queue.all()) }
+            icons.load()
         }
     }
 
@@ -53,6 +55,7 @@ class Repository(
         settings.save(PairedBridge(response.name, bridge.host, bridge.port, response.token))
         cache.clear()
         offline.clear()
+        icons.clear()
         _state.update { it.copy(snapshot = null) }
         refresh()
     }
@@ -66,6 +69,7 @@ class Repository(
         settings.clear()
         cache.clear()
         offline.clear()
+        icons.clear()
         _state.update { AppState(pending = it.pending) }
     }
 
@@ -80,6 +84,8 @@ class Repository(
             cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
             _state.update { it.copy(snapshot = snapshot, dataVersion = it.dataVersion + if (changed) 1 else 0) }
             offline.update(connection, snapshot.generation)
+            // Icons can take a while the first time; the lists show them as they arrive.
+            scope.launch { syncIcons(connection, snapshot) }
             if (_state.value.pending.any { it.rejectedReason == null }) scheduleSync()
             SyncStatus.Idle
         } catch (e: UnreachableException) {
@@ -89,6 +95,16 @@ class Repository(
             SyncStatus.Error(e.message.orEmpty())
         }
         _state.update { it.copy(status = status, pending = queue.all()) }
+    }
+
+    private suspend fun syncIcons(connection: Connection, snapshot: Snapshot) {
+        // Icons are decoration: on failure the lists fall back to plain markers, and the next refresh picks up
+        // where this one stopped.
+        try {
+            icons.sync(snapshot) { ids -> client.icons(connection, ids).icons }
+        } catch (_: UnreachableException) {
+        } catch (_: BridgeException) {
+        }
     }
 
     /** Background sync entry point. Returns true when nothing is left to retry. */

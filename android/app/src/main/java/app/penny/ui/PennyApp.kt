@@ -36,6 +36,7 @@ private object Routes {
     const val ACCOUNT = "account/{id}"
     const val ADD = "add?accountId={accountId}"
     const val SETTINGS = "settings"
+    const val HIDDEN_ACCOUNTS = "settings/hidden"
 
     fun account(id: String) = "account/${android.net.Uri.encode(id)}"
     fun add(accountId: String?) = if (accountId == null) "add" else "add?accountId=${android.net.Uri.encode(accountId)}"
@@ -105,10 +106,11 @@ private fun Screens(app: PennyApplication, nav: NavHostController, startDestinat
             HomeScreen(
                 repository = repository,
                 recent = vm,
-                hiddenFolders = app.preferences.hiddenFolders,
+                hiddenAccounts = app.preferences.hidden,
                 onOpenAccount = { nav.navigate(Routes.account(it)) },
                 onAdd = { nav.navigate(Routes.add(null)) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
+                onOpenHiddenAccounts = { nav.navigate(Routes.HIDDEN_ACCOUNTS) },
             )
         }
         composable(Routes.ACCOUNT, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
@@ -130,11 +132,11 @@ private fun Screens(app: PennyApplication, nav: NavHostController, startDestinat
         ) { entry ->
             val accountId = entry.arguments?.getString("accountId")
             val vm: AddTransactionViewModel = viewModel(factory = viewModelFactory {
-                initializer { AddTransactionViewModel(repository, app.preferences.hiddenFolders, accountId) }
+                initializer { AddTransactionViewModel(repository, app.preferences.hidden, accountId) }
             })
             AddTransactionScreen(
                 repository = repository,
-                hiddenFolders = app.preferences.hiddenFolders,
+                hiddenAccounts = app.preferences.hidden,
                 vm = vm,
                 onDone = { nav.popBackStack() },
             )
@@ -147,7 +149,11 @@ private fun Screens(app: PennyApplication, nav: NavHostController, startDestinat
                 repository = repository,
                 onBack = { nav.popBackStack() },
                 onUnpaired = toSetup,
+                onOpenHiddenAccounts = { nav.navigate(Routes.HIDDEN_ACCOUNTS) },
             )
+        }
+        composable(Routes.HIDDEN_ACCOUNTS) {
+            HiddenAccountsScreen(preferences = app.preferences, repository = repository, onBack = { nav.popBackStack() })
         }
     }
 }

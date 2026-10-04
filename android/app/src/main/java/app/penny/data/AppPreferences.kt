@@ -18,6 +18,9 @@ enum class AppLanguage(val tag: String) {
     SYSTEM(""), ENGLISH("en-US"), POLISH("pl");
 }
 
+/** What the user hid in settings: whole Money folders and single accounts, by ID. */
+data class HiddenAccounts(val folders: Set<String> = emptySet(), val accounts: Set<String> = emptySet())
+
 /**
  * UI preferences. Kept in SharedPreferences rather than DataStore because the theme has to be known synchronously
  * before the first activity is created. The language is stored by AppCompat itself (or by the system on Android 13+).
@@ -28,15 +31,28 @@ class AppPreferences(private val prefs: SharedPreferences) {
     )
     val theme: StateFlow<ThemeMode> = _theme.asStateFlow()
 
-    private val _hiddenFolders = MutableStateFlow(prefs.getStringSet(KEY_HIDDEN_FOLDERS, null).orEmpty().toSet())
-    /** IDs of Money folders whose accounts aren't shown. */
-    val hiddenFolders: StateFlow<Set<String>> = _hiddenFolders.asStateFlow()
+    private val _hidden = MutableStateFlow(
+        HiddenAccounts(
+            folders = prefs.getStringSet(KEY_HIDDEN_FOLDERS, null).orEmpty().toSet(),
+            accounts = prefs.getStringSet(KEY_HIDDEN_ACCOUNTS, null).orEmpty().toSet(),
+        )
+    )
+    /** Accounts that aren't shown. */
+    val hidden: StateFlow<HiddenAccounts> = _hidden.asStateFlow()
 
     fun setFolderHidden(folderId: String, hidden: Boolean) {
-        val updated = if (hidden) _hiddenFolders.value + folderId else _hiddenFolders.value - folderId
-        prefs.edit { putStringSet(KEY_HIDDEN_FOLDERS, updated) }
-        _hiddenFolders.value = updated
+        val folders = _hidden.value.folders.toggled(folderId, hidden)
+        prefs.edit { putStringSet(KEY_HIDDEN_FOLDERS, folders) }
+        _hidden.value = _hidden.value.copy(folders = folders)
     }
+
+    fun setAccountHidden(accountId: String, hidden: Boolean) {
+        val accounts = _hidden.value.accounts.toggled(accountId, hidden)
+        prefs.edit { putStringSet(KEY_HIDDEN_ACCOUNTS, accounts) }
+        _hidden.value = _hidden.value.copy(accounts = accounts)
+    }
+
+    private fun Set<String>.toggled(id: String, add: Boolean) = if (add) this + id else this - id
 
     /** Applies the stored theme; call before any activity is created. */
     fun applyTheme() = AppCompatDelegate.setDefaultNightMode(_theme.value.nightMode)
@@ -62,5 +78,6 @@ class AppPreferences(private val prefs: SharedPreferences) {
     private companion object {
         const val KEY_THEME = "theme"
         const val KEY_HIDDEN_FOLDERS = "hidden_folders"
+        const val KEY_HIDDEN_ACCOUNTS = "hidden_accounts"
     }
 }

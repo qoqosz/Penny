@@ -105,9 +105,16 @@
     <string name="language_english" translatable="false">English</string>
     <string name="language_polish" translatable="false">Polski</string>
     <string name="settings_accounts">Accounts</string>
-    <string name="hidden_folders_summary">Hide checked folders. Their accounts don\'t appear on the main screen, in the totals or when adding a transaction.</string>
-    <string name="hidden_folders_empty">Money folders appear here once accounts have been downloaded from the Mac.</string>
-    <string name="hidden_folders_old_bridge">To hide folders, update Penny Bridge on the Mac (penny-bridge install), then refresh.</string>
+    <string name="hidden_accounts">Hidden accounts</string>
+    <string name="hidden_accounts_none">All accounts are shown</string>
+    <plurals name="hidden_accounts_count">
+        <item quantity="one">%d account hidden</item>
+        <item quantity="other">%d accounts hidden</item>
+    </plurals>
+    <string name="hidden_accounts_summary">Hidden accounts don\'t appear on the main screen, in the totals or when adding a transaction. Hiding a folder also hides accounts added to it later.</string>
+    <string name="hidden_accounts_empty">Accounts appear here once they\'ve been downloaded from the Mac.</string>
+    <string name="hidden_folders_old_bridge">To hide whole folders, update Penny Bridge on the Mac (penny-bridge install), then refresh.</string>
+    <string name="hidden_with_folder">Hidden with its folder</string>
     <plurals name="account_count">
         <item quantity="one">%d account</item>
         <item quantity="other">%d accounts</item>

@@ -27,6 +27,8 @@ struct CategoryDTO: Codable {
     /// "expense", "income", "transfer" or "system" (the last two are not offered in the app's picker).
     let kind: String
     let usageCount: Int
+    /// See `IconID`; images come from `GET /icons`.
+    let iconId: String?
 }
 
 struct PayeeDTO: Codable {
@@ -34,6 +36,7 @@ struct PayeeDTO: Codable {
     let name: String
     let categoryId: String?
     let usageCount: Int
+    let iconId: String?
 }
 
 struct SplitDTO: Codable {
@@ -50,6 +53,7 @@ struct TransactionDTO: Codable {
     let accountId: String
     let date: Date
     let payee: String?
+    let payeeId: String?
     let note: String?
     let number: String?
     /// Signed amount in the account's currency.
@@ -121,6 +125,7 @@ struct MoneySnapshot {
     let accounts: [AccountDTO]
     let categories: [CategoryDTO]
     let payees: [PayeeDTO]
+    let iconSources: [String: IconSource]
     /// Newest first.
     let transactions: [TransactionDTO]
     let templatesByCategory: [String: TransactionTemplate]
@@ -139,20 +144,21 @@ struct MoneySnapshot {
 // MARK: - Reader
 
 enum MoneyReader {
-    static func read(model: NSManagedObjectModel, storeURL: URL) throws -> MoneySnapshot {
+    /// `moneyVersion` (Money.app's build) versions the category icons that come with the app.
+    static func read(model: NSManagedObjectModel, storeURL: URL, moneyVersion: String) throws -> MoneySnapshot {
         let generation = MoneyLocator.generation(of: storeURL)
         let store = try CoreDataStore(model: model, url: storeURL, readOnly: true)
         defer { store.close() }
-        return try store.perform { try build($0, generation: generation) }
+        return try store.perform { try build($0, generation: generation, moneyVersion: moneyVersion) }
     }
 
-    private static func build(_ ctx: NSManagedObjectContext, generation: String) throws -> MoneySnapshot {
+    private static func build(_ ctx: NSManagedObjectContext, generation: String, moneyVersion: String) throws -> MoneySnapshot {
         let currencies = try ctx.fetchAll("Currency")
         let defaultCurrency = currencies.first { $0.bool("defaultCurrency") }?.string("code")
 
         let accountObjects = try ctx.fetchAll("Account", prefetch: ["currency", "folder"])
         let categoryObjects = try ctx.fetchAll("Category", prefetch: ["parentCategory", "account"])
-        let payeeObjects = try ctx.fetchAll("Payee", prefetch: ["category"])
+        let payeeObjects = try ctx.fetchAll("Payee", prefetch: ["category", "icon"])
         let transactionObjects = try ctx.fetchAll(
             "Transaction", NSPredicate(format: "isScheduledTransaction == nil OR isScheduledTransaction == NO"),
             subentities: false,
@@ -234,7 +240,8 @@ enum MoneyReader {
 
             transactions.append(TransactionDTO(
                 id: tx.publicID, accountId: account.publicID, date: date,
-                payee: tx.string("payeeName") ?? tx.object("payee")?.string("name"), note: tx.string("note"),
+                payee: tx.string("payeeName") ?? tx.object("payee")?.string("name"), payeeId: tx.object("payee")?.publicID,
+                note: tx.string("note"),
                 number: tx.string("transactionNumber"), amount: total.plainString, currency: currency,
                 kind: kind.rawValue, reconciled: tx.int("reconciledStatus"), splits: splits))
 
@@ -285,6 +292,22 @@ enum MoneyReader {
         let incomeType = templatesByKind[.income]?.transactionType
         let expenseType = templatesByKind[.expense]?.transactionType
 
+        // Icons are only read here; the phone never sends any back.
+        var iconSources: [String: IconSource] = [:]
+        func categoryIcon(_ c: NSManagedObject) -> String? {
+            guard let name = c.string("iconFileName"), !name.isEmpty else { return nil }
+            let id = IconID.bundled(name: name, moneyVersion: moneyVersion)
+            iconSources[id] = .bundled(name)
+            return id
+        }
+        func payeeIcon(_ p: NSManagedObject) -> String? {
+            guard let icon = p.object("icon"), let content = icon.value(forKey: "content") as? Data, !content.isEmpty
+            else { return nil }
+            let id = IconID.stored(content: content)
+            iconSources[id] = .stored(icon.objectID.uriRepresentation())
+            return id
+        }
+
         let categories = categoryObjects.map { c -> CategoryDTO in
             let signs = categorySigns[c.objectID] ?? (0, 0)
             let kind: Kind
@@ -302,18 +325,18 @@ enum MoneyReader {
             return CategoryDTO(
                 id: c.publicID, name: c.string("name") ?? "?", fullName: fullName(c),
                 parentId: c.object("parentCategory")?.publicID, kind: kind.rawValue,
-                usageCount: signs.neg + signs.pos)
+                usageCount: signs.neg + signs.pos, iconId: categoryIcon(c))
         }.sorted { $0.fullName.localizedCompare($1.fullName) == .orderedAscending }
 
         let payees = payeeObjects.compactMap { p -> PayeeDTO? in
             guard let name = p.string("name"), !name.isEmpty else { return nil }
             return PayeeDTO(id: p.publicID, name: name, categoryId: p.object("category")?.publicID,
-                            usageCount: payeeUsage[p.objectID] ?? 0)
+                            usageCount: payeeUsage[p.objectID] ?? 0, iconId: payeeIcon(p))
         }.sorted { ($0.usageCount, $1.name) > ($1.usageCount, $0.name) }
 
         return MoneySnapshot(
             generation: generation, defaultCurrency: defaultCurrency, accounts: accounts,
-            categories: categories, payees: payees, transactions: transactions,
+            categories: categories, payees: payees, iconSources: iconSources, transactions: transactions,
             templatesByCategory: templatesByCategory.mapValues(\.template),
             templatesByKind: templatesByKind, idStyle: IDStyle.detect(idSamples))
     }

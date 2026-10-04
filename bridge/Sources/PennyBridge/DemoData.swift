@@ -1,5 +1,5 @@
+import AppKit
 import CoreData
-import Foundation
 
 /// Builds a store in Money's format filled with made-up data (English names, USD), plus a bridge home that serves it.
 /// Used for screenshots and for trying the app without real Money data. Dates are relative to today.
@@ -74,6 +74,27 @@ enum DemoData {
     private static let expenseType = 20, incomeType = 10, transferType = 30
     private static let regularSplit = 0, transferSplit = 10, userCategory = 9999
 
+    /// A square PNG with a white letter on `color`, standing in for a payee's logo.
+    static func monogram(_ letter: String, color: NSColor) -> Data? {
+        let size = 128
+        guard let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        color.setFill()
+        NSRect(x: 0, y: 0, width: size, height: size).fill()
+        let text = NSAttributedString(string: letter, attributes: [
+            .font: NSFont.systemFont(ofSize: 72, weight: .semibold), .foregroundColor: NSColor.white,
+        ])
+        let bounds = text.size()
+        text.draw(at: NSPoint(x: (CGFloat(size) - bounds.width) / 2, y: (CGFloat(size) - bounds.height) / 2))
+        NSGraphicsContext.restoreGraphicsState()
+        guard let image = ctx.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    }
+
     private static func seed(model: NSManagedObjectModel, url: URL) throws -> [(String, String)] {
         let store = try CoreDataStore.create(model: model, url: url)
         defer { store.close() }
@@ -104,28 +125,35 @@ enum DemoData {
             let vacation = account("Vacation", savings)
             let oldChecking = account("Old Checking", everyday, closed: true)
 
-            func category(_ name: String, _ type: Int, parent: NSManagedObject? = nil) -> NSManagedObject {
-                make("Category", ["name": name, "categoryType": userCategory, "defaultTransactionType": type, "parentCategory": parent])
+            // Icons are names of images in Money.app, like the ones Money gives its default categories.
+            func category(_ name: String, _ type: Int, icon: String, parent: NSManagedObject? = nil) -> NSManagedObject {
+                make("Category", ["name": name, "categoryType": userCategory, "defaultTransactionType": type,
+                                  "parentCategory": parent, "iconFileName": icon])
             }
-            let food = category("Food", expenseType)
-            let groceries = category("Groceries", expenseType, parent: food)
-            let restaurants = category("Restaurants", expenseType, parent: food)
-            let coffee = category("Coffee", expenseType, parent: food)
-            let housing = category("Housing", expenseType)
-            let rent = category("Rent", expenseType, parent: housing)
-            let utilities = category("Utilities", expenseType, parent: housing)
-            let transport = category("Transport", expenseType)
-            let fuel = category("Fuel", expenseType, parent: transport)
-            let transit = category("Public Transit", expenseType, parent: transport)
-            let shopping = category("Shopping", expenseType)
-            let entertainment = category("Entertainment", expenseType)
-            let health = category("Health", expenseType)
-            let subscriptions = category("Subscriptions", expenseType)
-            let salary = category("Salary", incomeType)
-            let interest = category("Interest", incomeType)
-            _ = category("Gifts", incomeType)
+            let food = category("Food", expenseType, icon: "Food & Dining")
+            let groceries = category("Groceries", expenseType, icon: "Food & Dining_Groceries", parent: food)
+            let restaurants = category("Restaurants", expenseType, icon: "Food & Dining_Restaurants", parent: food)
+            let coffee = category("Coffee", expenseType, icon: "Food & Dining_Coffee Shops & Bakeries", parent: food)
+            let housing = category("Housing", expenseType, icon: "Home")
+            let rent = category("Rent", expenseType, icon: "Home_Mortgage & Rent", parent: housing)
+            let utilities = category("Utilities", expenseType, icon: "Bills & Utilities_Utilities", parent: housing)
+            let transport = category("Transport", expenseType, icon: "Auto Transport")
+            let fuel = category("Fuel", expenseType, icon: "Auto Transport_Gas & Fuel", parent: transport)
+            let transit = category("Public Transit", expenseType, icon: "Auto Transport_Public Transportation", parent: transport)
+            let shopping = category("Shopping", expenseType, icon: "Shopping")
+            let entertainment = category("Entertainment", expenseType, icon: "Entertainment")
+            let health = category("Health", expenseType, icon: "Health & Fitness_Pharmacy")
+            let subscriptions = category("Subscriptions", expenseType, icon: "Entertainment_Movies & DVDs")
+            let salary = category("Salary", incomeType, icon: "Income_Paycheck")
+            let interest = category("Interest", incomeType, icon: "Income_Interest Income")
+            _ = category("Gifts", incomeType, icon: "Gifts & Donations_Gift")
             let adjustment = make("Category", ["name": "Balance Adjustment", "categoryType": 30, "defaultTransactionType": -1])
 
+            // Made-up payees get a logo (a monogram); the rest show their category's icon.
+            let logos: [String: NSColor] = [
+                "Acme Corp": .systemIndigo, "Parkview Apartments": .systemTeal, "City Power & Light": .systemOrange,
+                "Sushi Zen": .systemRed, "Thai Basil": .systemGreen, "Joe's Pizza": .systemBrown, "Metro Transit": .systemBlue,
+            ]
             var payees: [String: NSManagedObject] = [:]
             let calendar = Calendar.current
             let today = calendar.startOfDay(for: Date())
@@ -136,8 +164,14 @@ enum DemoData {
             func tx(_ account: NSManagedObject, _ date: Date, _ type: Int, payee: String?, note: String?) -> NSManagedObject {
                 var payeeObject: NSManagedObject?
                 if let payee {
-                    payeeObject = payees[payee] ?? make("Payee", ["name": payee])
-                    payees[payee] = payeeObject
+                    if payees[payee] == nil {
+                        let p = make("Payee", ["name": payee])
+                        if let color = logos[payee], let png = monogram(String(payee.prefix(1)), color: color) {
+                            p.setValue(make("Icon", ["content": png]), forKey: "icon")
+                        }
+                        payees[payee] = p
+                    }
+                    payeeObject = payees[payee]
                 }
                 return make("Transaction", [
                     "account": account, "date": date, "lastModificationDate": date, "transactionType": type,

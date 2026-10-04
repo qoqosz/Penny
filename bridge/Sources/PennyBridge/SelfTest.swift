@@ -1,5 +1,5 @@
+import AppKit
 import CoreData
-import Foundation
 
 /// End-to-end test against throwaway stores built from Money's own data model. Never touches real Money data
 /// or the running app.
@@ -79,6 +79,31 @@ enum SelfTest {
         check(categories.first { $0["name"] as? String == "Balance Adjustment" }?["kind"] as? String == "system",
               "system category hidden")
 
+        print("Icons")
+        let payees = snap.json["payees"] as? [[String: Any]] ?? []
+        let lidl = payees.first { $0["id"] as? String == ids.lidl }
+        let payeeIcon = lidl?["iconId"] as? String ?? ""
+        let categoryIcon = food?["iconId"] as? String ?? ""
+        check(payeeIcon.hasPrefix("p") && categoryIcon.hasPrefix("c"), "payee and category icon IDs (\(payeeIcon), \(categoryIcon))")
+        check(categories.first { $0["id"] as? String == ids.salary }?["iconId"] == nil, "no icon ID without an icon")
+        let iconsResponse = try call("GET", "\(base)/icons?ids=\(payeeIcon),\(categoryIcon),cnope", token: token)
+        let icons = iconsResponse.json["icons"] as? [[String: Any]] ?? []
+        func iconImage(_ id: String) -> (type: String, image: CGImage?) {
+            let icon = icons.first { $0["id"] as? String == id }
+            let data = (icon?["data"] as? String).flatMap { Data(base64Encoded: $0) } ?? Data()
+            let image = CGImageSourceCreateWithData(data as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+            return (icon?["contentType"] as? String ?? "", image)
+        }
+        let logo = iconImage(payeeIcon), glyph = iconImage(categoryIcon)
+        check(icons.count == 2, "icons endpoint returns known icons only (\(icons.count))")
+        check(logo.type == "image/jpeg" && logo.image?.width == IconRenderer.maxPixels, "payee logo scaled to a JPEG thumbnail")
+        check(glyph.type == "image/png" && glyph.image?.alphaInfo != CGImageAlphaInfo.none, "category glyph from Money.app as a PNG with alpha")
+        let tooMany = Array(repeating: "x", count: IconRenderer.maxPerRequest + 1).joined(separator: ",")
+        check(try call("GET", "\(base)/icons?ids=\(tooMany)", token: token).status == 400, "too many icons at once → 400")
+        let seededPage = try call("GET", "\(base)/transactions?accountId=\(ids.account)", token: token)
+        let seededItems = seededPage.json["items"] as? [[String: Any]] ?? []
+        check(seededItems.contains { $0["payeeId"] as? String == ids.lidl }, "transaction links its payee")
+
         print("Writing")
         let clientId = UUID().uuidString
         let newTx: [String: Any] = [
@@ -90,6 +115,7 @@ enum SelfTest {
         check(created.json["amount"] as? String == "-12.34", "expense amount negative")
         check(created.json["kind"] as? String == "expense", "kind: expense")
         check(created.json["payee"] as? String == "Biedronka", "payee saved")
+        check(created.json["payeeId"] is String, "new payee linked")
         let createdID = created.json["id"] as? String ?? "?"
 
         let again = try call("POST", "\(base)/transactions", token: token, body: newTx)
@@ -134,6 +160,11 @@ enum SelfTest {
         check(rows.first?["payee"] != nil && rows.first?["fok"] != nil, "payee relationship and ordered split")
         let maxPK = try db.query("SELECT Z_MAX m FROM Z_PRIMARYKEY WHERE Z_NAME = 'Transaction'").first?["m"] as? Int64
         check(maxPK == 4, "Z_PRIMARYKEY updated")
+        let iconRows = try db.query("SELECT COUNT(*) c FROM ZICON").first?["c"] as? Int64
+        check(iconRows == 1, "the phone's transactions add no icons")
+        let afterWrites = try call("GET", "\(base)/snapshot", token: token)
+        let newPayee = (afterWrites.json["payees"] as? [[String: Any]])?.first { $0["name"] as? String == "Biedronka" }
+        check(newPayee != nil && newPayee?["iconId"] == nil, "new payee without an icon")
 
         print("SyncKit")
         let sync = try SQLiteDB(path: location.syncStoreURL!.path)
@@ -153,6 +184,7 @@ enum SelfTest {
         let account: String
         let food: String
         let salary: String
+        let lidl: String
     }
 
     private static func seed(_ location: MoneyLocation) throws -> Seeded {
@@ -171,7 +203,10 @@ enum SelfTest {
             let pln = make("Currency", ["code": "PLN", "defaultCurrency": true])
             let folder = make("Folder", ["name": "Archiwum"])
             let account = make("Account", ["name": "Konto testowe", "currency": pln, "folder": folder])
-            let food = make("Category", ["name": "Jedzenie", "categoryType": 9999, "defaultTransactionType": 21])
+            let food = make("Category", ["name": "Jedzenie", "categoryType": 9999, "defaultTransactionType": 21,
+                                         "iconFileName": "Food & Dining_Groceries"])
+            let lidl = make("Payee", ["name": "Lidl"])
+            lidl.setValue(make("Icon", ["content": DemoData.monogram("L", color: .systemBlue)!]), forKey: "icon")
             let salary = make("Category", ["name": "Pensja", "categoryType": 9999, "defaultTransactionType": 11])
             _ = make("Category", ["name": "Balance Adjustment", "categoryType": 30, "defaultTransactionType": -1])
             for (type, amount, category) in [(21, "-10", food), (11, "100", salary)] {
@@ -179,13 +214,14 @@ enum SelfTest {
                     "account": account, "date": Date(timeIntervalSinceNow: -86400), "transactionType": type,
                     "isScheduledTransaction": false, "readonly": false, "currencyCode": "PLN",
                 ])
+                if category === food { tx.setValue(lidl, forKey: "payee") }
                 _ = make("TransactionSplit", [
                     "transaction": tx, "amount": NSDecimalNumber(string: amount),
                     "amountInAccountCurrency": NSDecimalNumber(string: amount), "category": category, "type": 7,
                 ])
             }
             try ctx.save()
-            return Seeded(account: account.publicID, food: food.publicID, salary: salary.publicID)
+            return Seeded(account: account.publicID, food: food.publicID, salary: salary.publicID, lidl: lidl.publicID)
         }
         store.close()
 

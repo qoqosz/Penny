@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import app.penny.R
 import app.penny.data.DiscoveredBridge
 import app.penny.data.Discovery
+import app.penny.data.HiddenAccounts
 import app.penny.data.Kind
 import app.penny.data.NewTransactionRequest
 import app.penny.data.NotPairedException
@@ -143,7 +144,7 @@ data class AddForm(
 
 class AddTransactionViewModel(
     private val repository: Repository,
-    private val hiddenFolders: StateFlow<Set<String>>,
+    private val hiddenAccounts: StateFlow<HiddenAccounts>,
     initialAccountId: String?,
 ) : ViewModel() {
     private val _form = MutableStateFlow(AddForm(accountId = initialAccountId ?: defaultAccount()))
@@ -151,7 +152,7 @@ class AddTransactionViewModel(
 
     private fun defaultAccount(): String? {
         val snapshot = repository.state.value.snapshot ?: return null
-        val candidates = snapshot.accounts.filter { !it.closed && !it.isHidden(hiddenFolders.value) }
+        val candidates = snapshot.accounts.filter { !it.closed && !it.isHidden(hiddenAccounts.value) }
         val lastUsed = repository.state.value.pending.lastOrNull()?.request?.accountId
         return lastUsed?.takeIf { id -> candidates.any { it.id == id } }
             ?: candidates.filter { !it.hasInvestments }.maxByOrNull { it.transactionCount }?.id

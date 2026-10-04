@@ -23,8 +23,9 @@ data class Account(
 ) {
     val balanceValue: BigDecimal get() = balance.toBigDecimalOrNull() ?: BigDecimal.ZERO
 
-    /** Accounts in folders the user hid in settings stay out of lists, totals and the account picker. */
-    fun isHidden(hiddenFolders: Set<String>): Boolean = folderId != null && folderId in hiddenFolders
+    /** Accounts the user hid in settings, alone or with their folder, stay out of lists, totals and the account picker. */
+    fun isHidden(hidden: HiddenAccounts): Boolean =
+        id in hidden.accounts || (folderId != null && folderId in hidden.folders)
 }
 
 @Serializable
@@ -35,6 +36,8 @@ data class Category(
     val parentId: String? = null,
     val kind: String,
     val usageCount: Int = 0,
+    /** A glyph from Money.app, drawn tinted (see [IconStore]). */
+    val iconId: String? = null,
 )
 
 @Serializable
@@ -43,6 +46,8 @@ data class Payee(
     val name: String,
     val categoryId: String? = null,
     val usageCount: Int = 0,
+    /** The payee's logo in Money (see [IconStore]). */
+    val iconId: String? = null,
 )
 
 @Serializable
@@ -61,6 +66,7 @@ data class Transaction(
     val accountId: String,
     val date: String,
     val payee: String? = null,
+    val payeeId: String? = null,
     val note: String? = null,
     val number: String? = null,
     val amount: String,
@@ -82,7 +88,14 @@ data class Snapshot(
     val accounts: List<Account>,
     val categories: List<Category>,
     val payees: List<Payee>,
-)
+) {
+    // Delegated properties aren't serialized.
+    private val payeesById by lazy { payees.associateBy { it.id } }
+    private val categoriesById by lazy { categories.associateBy { it.id } }
+
+    fun payee(id: String?): Payee? = id?.let(payeesById::get)
+    fun category(id: String?): Category? = id?.let(categoriesById::get)
+}
 
 @Serializable
 data class TransactionPage(
@@ -117,6 +130,13 @@ data class PendingTransaction(
     val rejectedReason: String? = null,
     val lastError: String? = null,
 )
+
+/** An image from Money, encoded as PNG or JPEG. */
+@Serializable
+data class IconData(val id: String, val contentType: String, /** Base64. */ val data: String)
+
+@Serializable
+data class IconBatch(val icons: List<IconData>)
 
 @Serializable
 data class PairRequest(val code: String, val deviceName: String)

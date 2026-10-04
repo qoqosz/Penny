@@ -6,6 +6,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import app.penny.data.AppPreferences
 import app.penny.data.BridgeClient
 import app.penny.data.Discovery
+import app.penny.data.IconStore
 import app.penny.data.JsonStore
 import app.penny.data.PendingQueue
 import app.penny.data.Repository
@@ -31,6 +32,7 @@ class PennyApplication : Application() {
             discovery = discovery,
             cache = JsonStore(File(filesDir, "cache")),
             queue = PendingQueue(JsonStore(File(filesDir, "queue"))),
+            icons = IconStore(File(filesDir, "icons")),
             scope = appScope,
             scheduleSync = { SyncWorker.schedule(this) },
         )
