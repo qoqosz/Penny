@@ -68,6 +68,7 @@
     <string name="details_transfer_from">From %s</string>
     <string name="details_splits">Split</string>
     <string name="details_payee_history">More with %s</string>
+    <string name="details_show_all">See all</string>
 
     <!-- Add transaction -->
     <string name="add_title">New transaction</string>

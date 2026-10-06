@@ -73,6 +73,14 @@ import app.penny.data.Split
 import app.penny.data.Tag
 import app.penny.data.Transaction
 import kotlinx.serialization.json.Json
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import java.math.BigDecimal
+import java.time.YearMonth
 
 private val transactionSaver = Saver<Transaction?, String>(
     save = { it?.let { tx -> Json.encodeToString(Transaction.serializer(), tx) } },
@@ -97,6 +105,7 @@ fun TransactionDetailsSheet(
     val snapshot = app.snapshot
     val scroll = rememberScrollState()
     LaunchedEffect(tx.id) { scroll.animateScrollTo(0) }
+    var showAll by rememberSaveable { mutableStateOf(false) }
     val history by produceState<List<Transaction>>(emptyList(), tx.payeeId, app.dataVersion) {
         value = tx.payeeId?.let { repository.payeeTransactions(it) }.orEmpty()
     }
@@ -118,8 +127,15 @@ fun TransactionDetailsSheet(
             DetailsCard(tx, snapshot, repository)
             if (tx.splits.size > 1) SplitsCard(tx, snapshot, repository)
             val others = history.filter { it.id != tx.id }
-            if (others.isNotEmpty()) PayeeHistoryCard(tx, others, snapshot, onSelect)
+            if (others.isNotEmpty()) PayeeHistoryCard(tx, others, snapshot, onSelect, onShowAll = { showAll = true })
         }
+    }
+    if (showAll && history.isNotEmpty()) {
+        PayeeTransactionsSheet(
+            tx, history, snapshot, repository,
+            onSelect = { showAll = false; onSelect(it) },
+            onDismiss = { showAll = false },
+        )
     }
 }
 
@@ -211,7 +227,7 @@ private fun DetailsCard(tx: Transaction, snapshot: Snapshot?, repository: Reposi
                 rate?.let {
                     stringResource(
                         R.string.details_exchange_rate,
-                        Format.money(java.math.BigDecimal.ONE, tx.originalCurrency), Format.rate(it, tx.currency),
+                        Format.money(BigDecimal.ONE, tx.originalCurrency), Format.rate(it, tx.currency),
                     )
                 },
             )
@@ -287,13 +303,14 @@ private fun SplitItem(split: Split, tx: Transaction, snapshot: Snapshot?, reposi
     )
 }
 
-/** Like Money's payee popover: the payee's other transactions, newest first. */
+/** Like Money's payee popover: the payee's latest other transactions, and a link to all of them. */
 @Composable
 private fun PayeeHistoryCard(
     tx: Transaction,
     others: List<Transaction>,
     snapshot: Snapshot?,
     onSelect: (Transaction) -> Unit,
+    onShowAll: () -> Unit,
 ) {
     Column {
         SheetSectionHeader(
@@ -303,24 +320,111 @@ private fun PayeeHistoryCard(
         GroupCard {
             others.take(HISTORY_ROWS).forEachIndexed { index, other ->
                 if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-                val info = transactionInfo(other, snapshot)
+                PayeeHistoryItem(other, snapshot, Format.shortDate(other.instant), onSelect)
+            }
+            if (others.size > HISTORY_ROWS) {
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                 ListItem(
-                    modifier = Modifier.clickable { onSelect(other) },
+                    modifier = Modifier.clickable(onClick = onShowAll),
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    headlineContent = { Text(Format.shortDate(other.instant)) },
-                    supportingContent = {
-                        val account = snapshot?.accounts?.firstOrNull { it.id == other.accountId }?.name
-                        Text(
-                            listOfNotNull(info.category, account).joinToString(" · "),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    headlineContent = {
+                        Text(stringResource(R.string.details_show_all), color = MaterialTheme.colorScheme.primary)
+                    },
+                    trailingContent = {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
                         )
                     },
-                    trailingContent = { AmountText(other.amount, other.currency, style = MaterialTheme.typography.bodyMedium) },
                 )
             }
         }
     }
 }
+
+@Composable
+private fun PayeeHistoryItem(
+    tx: Transaction,
+    snapshot: Snapshot?,
+    date: String,
+    onSelect: (Transaction) -> Unit,
+    current: Boolean = false,
+) {
+    val info = transactionInfo(tx, snapshot)
+    val account = snapshot?.accounts?.firstOrNull { it.id == tx.accountId }?.name
+    ListItem(
+        modifier = Modifier.clickable { onSelect(tx) },
+        colors = ListItemDefaults.colors(
+            containerColor = if (current) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+        ),
+        headlineContent = { Text(date) },
+        supportingContent = {
+            Text(listOfNotNull(info.category, account).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        trailingContent = { AmountText(tx.amount, tx.currency, style = MaterialTheme.typography.bodyMedium) },
+    )
+}
+
+/** Every transaction with the payee of [tx] (which is highlighted), by month, in a sheet of its own. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PayeeTransactionsSheet(
+    tx: Transaction,
+    all: List<Transaction>,
+    snapshot: Snapshot?,
+    repository: Repository,
+    onSelect: (Transaction) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val months = remember(all) { all.groupBy { YearMonth.from(Format.localDate(it.instant)) }.toList() }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.statusBarsPadding(),
+    ) {
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item(key = "header") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TransactionAvatar(tx, transactionInfo(tx, snapshot), snapshot, repository, size = 48)
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            tx.payee ?: stringResource(R.string.transaction), style = MaterialTheme.typography.titleLarge,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            listOf(pluralStringResource(R.plurals.transaction_count, all.size, all.size), totals(all))
+                                .joinToString(" · "),
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            items(months, key = { it.first.toString() }) { (month, items) ->
+                Column {
+                    SheetSectionHeader(Format.month(month), totals(items))
+                    GroupCard {
+                        items.forEachIndexed { index, other ->
+                            if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                            PayeeHistoryItem(
+                                other, snapshot, Format.date(other.instant, "EEEEdMMMM"), onSelect, current = other.id == tx.id,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Signed sums per currency, e.g. "-$123.45 · -€67.00". */
+private fun totals(transactions: List<Transaction>): String =
+    transactions.groupBy { it.currency }
+        .map { (currency, list) -> Format.money(list.fold(BigDecimal.ZERO) { sum, t -> sum + t.amountValue }, currency, signed = true) }
+        .joinToString(" · ")
 
 @Composable
 private fun SheetSectionHeader(text: String, trailing: String? = null) {

@@ -11,6 +11,7 @@ import java.math.RoundingMode
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Currency
@@ -71,10 +72,22 @@ object Format {
     }
 
     @Composable
-    fun shortDate(instant: Instant): String {
+    fun shortDate(instant: Instant): String = date(instant, "dMMMyyyy")
+
+    /** [instant]'s local date in the app language's best pattern for [skeleton] (see `DateFormat.getBestDateTimePattern`). */
+    @Composable
+    fun date(instant: Instant, skeleton: String): String {
         val locale = LocalConfiguration.current.locales[0]
-        val pattern = DateFormat.getBestDateTimePattern(locale, "dMMMyyyy")
-        return instant.atZone(zone).format(DateTimeFormatter.ofPattern(pattern, locale))
+        val pattern = DateFormat.getBestDateTimePattern(locale, skeleton)
+        return instant.atZone(zone).format(DateTimeFormatter.ofPattern(pattern, locale)).replaceFirstChar { it.titlecase(locale) }
+    }
+
+    /** E.g. "September 2026" (the nominative form in Polish: "Wrzesień 2026"). */
+    @Composable
+    fun month(month: YearMonth): String {
+        val locale = LocalConfiguration.current.locales[0]
+        val pattern = DateFormat.getBestDateTimePattern(locale, "MMMMyyyy")
+        return month.format(DateTimeFormatter.ofPattern(pattern, locale)).replaceFirstChar { it.titlecase(locale) }
     }
 
     /** Accepts "12,50", "12.50", "1 234,5". Returns null for anything that isn't a positive amount. */
