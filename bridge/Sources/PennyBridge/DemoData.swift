@@ -147,13 +147,30 @@ enum DemoData {
             let salary = category("Salary", incomeType, icon: "Income_Paycheck")
             let interest = category("Interest", incomeType, icon: "Income_Interest Income")
             _ = category("Gifts", incomeType, icon: "Gifts & Donations_Gift")
+            let travel = category("Travel", expenseType, icon: "Travel")
+            let hotel = category("Hotel", expenseType, icon: "Travel_Hotel", parent: travel)
             let adjustment = make("Category", ["name": "Balance Adjustment", "categoryType": 30, "defaultTransactionType": -1])
+            _ = make("Currency", ["code": "EUR"])
+
+            let business = make("Tag", ["name": "Business", "colorName": "tag_orange", "tagType": 0])
+            let lisbon = make("Tag", ["name": "Lisbon", "colorName": "tag_blue", "tagType": 0])
+            let tripTag = make("Tag", ["name": "Vacation", "colorName": "tag_green", "tagType": 0])
 
             // Made-up payees get a logo (a monogram); the rest show their category's icon.
             let logos: [String: NSColor] = [
                 "Acme Corp": .systemIndigo, "Parkview Apartments": .systemTeal, "City Power & Light": .systemOrange,
                 "Sushi Zen": .systemRed, "Thai Basil": .systemGreen, "Joe's Pizza": .systemBrown, "Metro Transit": .systemBlue,
             ]
+            // Where some payees are; their transactions get that location, as when Money fills it in from the map.
+            let places: [String: (street: String, city: String, state: String?, zip: String, country: String, lat: Double, lon: Double)] = [
+                "Blue Bottle Coffee": ("66 Mint St", "San Francisco", "CA", "94103", "United States", 37.7825, -122.4072),
+                "Sushi Zen": ("1540 Polk St", "San Francisco", "CA", "94109", "United States", 37.7896, -122.4207),
+                "Whole Foods": ("1765 California St", "San Francisco", "CA", "94109", "United States", 37.7904, -122.4239),
+                "Pastéis de Belém": ("R. de Belém 84", "Lisbon", nil, "1300-085", "Portugal", 38.6975, -9.2032),
+                "Time Out Market": ("Av. 24 de Julho 49", "Lisbon", nil, "1200-479", "Portugal", 38.7069, -9.1459),
+                "Hotel Alfama": ("R. de São Miguel 12", "Lisbon", nil, "1100-544", "Portugal", 38.7114, -9.1297),
+            ]
+            var placemarks: [String: NSManagedObject] = [:]
             var payees: [String: NSManagedObject] = [:]
             let calendar = Calendar.current
             let today = calendar.startOfDay(for: Date())
@@ -173,11 +190,19 @@ enum DemoData {
                     }
                     payeeObject = payees[payee]
                 }
+                var placemark: NSManagedObject?
+                if let payee, let place = places[payee] {
+                    placemark = placemarks[payee] ?? make("PayeePlacemark", [
+                        "payee": payeeObject, "street": place.street, "city": place.city, "state": place.state,
+                        "zip": place.zip, "country": place.country, "latitude": place.lat, "longitude": place.lon,
+                    ])
+                    placemarks[payee] = placemark
+                }
                 return make("Transaction", [
                     "account": account, "date": date, "lastModificationDate": date, "transactionType": type,
                     "isScheduledTransaction": false, "readonly": false, "createdFromScheduledTransaction": false,
                     "currencyCode": "USD", "currencyRateToAccountCurrency": NSDecimalNumber.one,
-                    "payeeName": payee, "payee": payeeObject, "note": note, "reconciledStatus": 0,
+                    "payeeName": payee, "payee": payeeObject, "note": note, "reconciledStatus": 0, "placemark": placemark,
                 ])
             }
             func split(_ tx: NSManagedObject, _ amount: Decimal, category: NSManagedObject?, type: Int) -> NSManagedObject {
@@ -187,13 +212,29 @@ enum DemoData {
                     "type": type, "createdDate": tx.value(forKey: "date"),
                 ])
             }
+            @discardableResult
             func entry(_ account: NSManagedObject, _ offset: Int, _ amount: Decimal, _ category: NSManagedObject,
-                       payee: String?, note: String? = nil, hour: Int = 12) {
+                       payee: String?, note: String? = nil, hour: Int = 12, tags: [NSManagedObject] = []) -> NSManagedObject {
                 let type = category === adjustment ? -1 : (amount < 0 ? expenseType : incomeType)
                 let t = tx(account, day(offset, hour: hour), type, payee: payee, note: note)
                 _ = split(t, amount, category: category, type: regularSplit)
+                t.setValue(NSSet(array: tags), forKey: "tags")
                 if let p = t.object("payee"), p.object("category") == nil, category !== adjustment {
                     p.setValue(category, forKey: "category")
+                }
+                return t
+            }
+            /// A card payment in euros: Money keeps the euro amounts in `amount` and the dollars in `amountInAccountCurrency`.
+            func euros(_ offset: Int, _ amount: Decimal, _ category: NSManagedObject, payee: String, note: String? = nil, hour: Int) {
+                let rate = Decimal(string: "1.0842")!
+                let t = entry(card, offset, amount * rate, category, payee: payee, note: note, hour: hour, tags: [tripTag, lisbon])
+                t.setValue("EUR", forKey: "currencyCode")
+                t.setValue(NSDecimalNumber(decimal: rate), forKey: "currencyRateToAccountCurrency")
+                for s in t.objects("transactionSplits") {
+                    s.setValue(NSDecimalNumber(decimal: amount), forKey: "amount")
+                    var dollars = amount * rate, rounded = Decimal()
+                    NSDecimalRound(&rounded, &dollars, 2, .bankers)
+                    s.setValue(NSDecimalNumber(decimal: rounded), forKey: "amountInAccountCurrency")
                 }
             }
             func transfer(_ from: NSManagedObject, _ to: NSManagedObject, _ offset: Int, _ amount: Decimal, note: String? = nil) {
@@ -241,7 +282,8 @@ enum DemoData {
                 }
                 if rng.chance(weekend ? 0.4 : 0.12) {
                     entry(card, offset, -rng.amount(14...86), restaurants,
-                          payee: rng.pick(["Chipotle", "Sushi Zen", "Olive Garden", "Joe's Pizza", "Thai Basil"]), hour: 19)
+                          payee: rng.pick(["Chipotle", "Sushi Zen", "Olive Garden", "Joe's Pizza", "Thai Basil"]), hour: 19,
+                          tags: weekend ? [] : [business])
                 }
                 if rng.chance(0.1) {
                     entry(card, offset, -rng.amount(38...64), fuel, payee: rng.pick(["Shell", "Chevron"]), hour: 17)
@@ -256,6 +298,13 @@ enum DemoData {
                 }
                 if rng.chance(0.04) { entry(card, offset, -rng.amount(9...46), health, payee: "CVS Pharmacy", hour: 13) }
             }
+
+            // A long weekend in Lisbon, paid in euros.
+            euros(26, -412.50, hotel, payee: "Hotel Alfama", note: "3 nights", hour: 15)
+            euros(25, -7.20, coffee, payee: "Pastéis de Belém", hour: 10)
+            euros(25, -48.60, restaurants, payee: "Time Out Market", hour: 20)
+            euros(24, -6.40, coffee, payee: "Pastéis de Belém", hour: 9)
+            euros(23, -39.90, restaurants, payee: "Time Out Market", note: "Dinner with Ana", hour: 21)
             try ctx.save()
         }
         return tracked

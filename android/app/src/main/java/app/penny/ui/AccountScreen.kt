@@ -24,6 +24,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -51,6 +52,7 @@ fun AccountScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     LoadMoreEffect(listState, list.canLoadMore) { transactions.loadMore() }
+    var selected by rememberSelectedTransaction()
 
     Scaffold(
         topBar = {
@@ -104,9 +106,12 @@ fun AccountScreen(
                         }
                     }
                 }
-                transactionItems(list.items, pending, app.snapshot, repository, showAccount = false)
+                transactionItems(list.items, pending, app.snapshot, repository, showAccount = false) { selected = it }
                 listFooter(list)
             }
         }
+    }
+    selected?.let { tx ->
+        TransactionDetailsSheet(tx, repository, onSelect = { selected = it }, onDismiss = { selected = null })
     }
 }

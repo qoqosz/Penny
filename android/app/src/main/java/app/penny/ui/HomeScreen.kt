@@ -231,9 +231,13 @@ private fun RecentList(repository: Repository, vm: TransactionsViewModel) {
     val list by vm.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     LoadMoreEffect(listState, list.canLoadMore) { vm.loadMore() }
+    var selected by rememberSelectedTransaction()
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
-        transactionItems(list.items, app.pending, app.snapshot, repository, showAccount = true)
+        transactionItems(list.items, app.pending, app.snapshot, repository, showAccount = true) { selected = it }
         listFooter(list)
+    }
+    selected?.let { tx ->
+        TransactionDetailsSheet(tx, repository, onSelect = { selected = it }, onDismiss = { selected = null })
     }
 }
 

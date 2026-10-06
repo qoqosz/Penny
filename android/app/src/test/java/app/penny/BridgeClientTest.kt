@@ -51,6 +51,26 @@ class BridgeClientTest {
         assertEquals("Bearer secret", request.getHeader("Authorization"))
     }
 
+    @Test fun `parses transaction details, with or without them`() = runTest {
+        server.enqueue(MockResponse().setBody("""
+            {"generation":"g","total":2,"offset":0,"items":[
+              {"id":"T1","accountId":"A","date":"2026-10-02T08:30:00Z","payee":"Lidl","amount":"-449.85","currency":"PLN",
+               "kind":"expense","reconciled":0,"splits":[{"id":"S1","amount":"-449.85","category":"Food"}],
+               "tags":[{"name":"Vacation","color":"blue"},{"name":"Home"}],
+               "location":{"street":"Puławska 2","city":"Warszawa","latitude":52.2,"longitude":21.02},
+               "originalAmount":"-101","originalCurrency":"EUR","exchangeRate":"4.4540"},
+              {"id":"T2","accountId":"A","date":"2026-10-01T08:30:00Z","amount":"5","currency":"PLN","kind":"income","reconciled":0,"splits":[]}
+            ]}
+        """.trimIndent()))
+        val (full, old) = client.transactions(connection, null, 0, 10).items
+        assertEquals(listOf("blue", null), full.tags.map { it.color })
+        assertTrue(full.location!!.hasCoordinates)
+        assertEquals("EUR", full.originalCurrency)
+        assertTrue("bridges before tags send none", old.tags.isEmpty())
+        assertNull(old.location)
+        assertNull(old.originalAmount)
+    }
+
     @Test fun `sends new transaction and maps bridge errors`() = runTest {
         server.enqueue(MockResponse().setResponseCode(422)
             .setBody("""{"error":{"code":"invalid","message":"Nie ma takiej kategorii."}}"""))

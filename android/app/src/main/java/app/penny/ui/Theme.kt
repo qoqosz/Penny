@@ -53,3 +53,17 @@ object AmountColors {
         @Composable @ReadOnlyComposable
         get() = MaterialTheme.colorScheme.onSurface
 }
+
+/** Money's tag colors (Money.app's asset catalog); unknown names get the outline color. */
+object TagColors {
+    private val byName = mapOf(
+        "red" to Color(0xFFFF3B30), "orange" to Color(0xFFFF9500), "yellow" to Color(0xFFFFCB02),
+        "green" to Color(0xFF34C759), "blue" to Color(0xFF34AADC), "purple" to Color(0xFFA684E7),
+        "grey" to Color(0xFF8E8E93), "gray" to Color(0xFF8E8E93), "brown" to Color(0xFF804000),
+        "coral" to Color(0xFFFF7F50), "pink" to Color(0xFFFFC0CB), "sky" to Color(0xFF87CEEB), "violet" to Color(0xFF8000FF),
+    )
+
+    /** Null for tags without a color. */
+    @Composable @ReadOnlyComposable
+    fun of(name: String?): Color? = name?.let { byName[it] ?: MaterialTheme.colorScheme.outline }
+}

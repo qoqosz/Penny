@@ -149,6 +149,10 @@ class Repository(
         }
     }
 
+    /** Every transaction with this payee, newest first, from the offline copy (empty until it's downloaded). */
+    suspend fun payeeTransactions(payeeId: String): List<Transaction> =
+        offline.current()?.items?.filter { it.payeeId == payeeId }.orEmpty()
+
     private suspend fun pushPending(connection: Connection) {
         for (item in queue.all()) {
             if (item.rejectedReason != null) continue

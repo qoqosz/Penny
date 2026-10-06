@@ -5,7 +5,7 @@ import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -40,7 +40,10 @@ fun rememberMoneyIcon(icons: IconStore, id: String?): ImageBitmap? {
     return bitmap
 }
 
-/** A payee's logo from Money. Logos are made for light backgrounds, so they sit on white in the dark theme too. */
+/**
+ * A payee's logo from Money, round as in Money. Logos are made for light backgrounds, so they sit on white in the
+ * dark theme too.
+ */
 @Composable
 fun PayeeLogo(bitmap: ImageBitmap, size: Dp = 32.dp) {
     Image(
@@ -49,7 +52,7 @@ fun PayeeLogo(bitmap: ImageBitmap, size: Dp = 32.dp) {
         contentScale = ContentScale.Fit,
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(size / 5))
+            .clip(CircleShape)
             .background(Color.White),
     )
 }

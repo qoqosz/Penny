@@ -61,6 +61,27 @@ data class Split(
 )
 
 @Serializable
+data class Tag(
+    val name: String,
+    /** Money's color name ("blue", "red", …), or null for no color. */
+    val color: String? = null,
+)
+
+/** Where the transaction happened, as Money recorded it. */
+@Serializable
+data class Location(
+    val street: String? = null,
+    val city: String? = null,
+    val state: String? = null,
+    val zip: String? = null,
+    val country: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+) {
+    val hasCoordinates: Boolean get() = latitude != null && longitude != null
+}
+
+@Serializable
 data class Transaction(
     val id: String,
     val accountId: String,
@@ -74,6 +95,14 @@ data class Transaction(
     val kind: String,
     val reconciled: Int = 0,
     val splits: List<Split> = emptyList(),
+    // Not sent by bridges older than the transaction details sheet.
+    val tags: List<Tag> = emptyList(),
+    val location: Location? = null,
+    /** Set when the transaction was in another currency: the signed amount in [originalCurrency]. */
+    val originalAmount: String? = null,
+    val originalCurrency: String? = null,
+    /** One unit of [originalCurrency] in [currency]. */
+    val exchangeRate: String? = null,
 ) {
     val instant: Instant get() = runCatching { Instant.parse(date) }.getOrDefault(Instant.EPOCH)
     val amountValue: BigDecimal get() = amount.toBigDecimalOrNull() ?: BigDecimal.ZERO

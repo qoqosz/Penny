@@ -48,6 +48,23 @@ struct SplitDTO: Codable {
     let transferAccountId: String?
 }
 
+struct TagDTO: Codable {
+    let name: String
+    /// Money's color name without its prefix ("tag_blue" and "tagBlue" are both "blue"), or nil for no color.
+    let color: String?
+}
+
+/// Where the transaction happened (Money's `PayeePlacemark`).
+struct LocationDTO: Codable {
+    let street: String?
+    let city: String?
+    let state: String?
+    let zip: String?
+    let country: String?
+    let latitude: Double?
+    let longitude: Double?
+}
+
 struct TransactionDTO: Codable {
     let id: String
     let accountId: String
@@ -62,6 +79,13 @@ struct TransactionDTO: Codable {
     let kind: String
     let reconciled: Int
     let splits: [SplitDTO]
+    let tags: [TagDTO]
+    let location: LocationDTO?
+    /// Set when the transaction was in another currency than the account's: the signed amount in that currency,
+    /// and the rate Money used (1 unit of `originalCurrency` in the account's currency).
+    let originalAmount: String?
+    let originalCurrency: String?
+    let exchangeRate: String?
 }
 
 struct SnapshotDTO: Codable {
@@ -162,7 +186,7 @@ enum MoneyReader {
         let transactionObjects = try ctx.fetchAll(
             "Transaction", NSPredicate(format: "isScheduledTransaction == nil OR isScheduledTransaction == NO"),
             subentities: false,
-            prefetch: ["account", "payee", "transactionSplits", "transactionSplits.category",
+            prefetch: ["account", "payee", "tags", "placemark", "transactionSplits", "transactionSplits.category", "transactionSplits.tags",
                        "transactionSplits.transferSplit", "transactionSplits.transferSplit.transaction"])
 
         var accountCurrency: [NSManagedObjectID: String] = [:]
@@ -192,6 +216,29 @@ enum MoneyReader {
                 ?? split.object("category")?.object("account")
         }
 
+        func tags(of tx: NSManagedObject, splits: [NSManagedObject]) -> [TagDTO] {
+            var seen = Set<NSManagedObjectID>()
+            return ([tx] + splits).flatMap { $0.objects("tags") }
+                .filter { seen.insert($0.objectID).inserted }
+                .compactMap { tag in
+                    guard let name = tag.string("name"), !name.isEmpty else { return nil }
+                    return TagDTO(name: name, color: tagColor(tag.string("colorName")))
+                }
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
+
+        func location(of tx: NSManagedObject) -> LocationDTO? {
+            guard let p = tx.object("placemark") else { return nil }
+            func text(_ key: String) -> String? { p.string(key).flatMap { $0.isEmpty ? nil : $0 } }
+            func coordinate(_ key: String) -> Double? { (p.value(forKey: key) as? NSNumber)?.doubleValue }
+            let location = LocationDTO(
+                street: text("street"), city: text("city"), state: text("state"), zip: text("zip"),
+                country: text("country"), latitude: coordinate("latitude"), longitude: coordinate("longitude"))
+            let empty = [location.street, location.city, location.country].allSatisfy { $0 == nil }
+                && (location.latitude == nil || location.longitude == nil)
+            return empty ? nil : location
+        }
+
         // Transactions, plus per-account totals and per-category usage statistics.
         var transactions: [TransactionDTO] = []
         var balances: [NSManagedObjectID: Decimal] = [:]
@@ -210,6 +257,7 @@ enum MoneyReader {
             let date = tx.date("date") ?? .distantPast
             let currency = accountCurrency[account.objectID] ?? ""
             var total: Decimal = 0
+            var originalTotal: Decimal = 0
             var splits: [SplitDTO] = []
             var isTransfer = false
             let splitObjects = tx.objects("transactionSplits")
@@ -218,6 +266,7 @@ enum MoneyReader {
                 let inAccount = split.decimal("amountInAccountCurrency")
                 let amount = inAccount != 0 ? inAccount : raw
                 total += amount
+                originalTotal += raw
                 let category = split.object("category")
                 let transfer = transferAccount(of: split)
                 if transfer != nil { isTransfer = true }
@@ -237,13 +286,18 @@ enum MoneyReader {
             if date > (lastDates[account.objectID] ?? .distantPast) { lastDates[account.objectID] = date }
             if let payee = tx.object("payee") { payeeUsage[payee.objectID, default: 0] += 1 }
             if let id = tx.string("uniqueIdentifier"), idSamples.count < 200 { idSamples.append(id) }
+            let txCurrency = tx.string("currencyCode")
+            let foreign = txCurrency.map { !$0.isEmpty && $0 != currency } ?? false
 
             transactions.append(TransactionDTO(
                 id: tx.publicID, accountId: account.publicID, date: date,
                 payee: tx.string("payeeName") ?? tx.object("payee")?.string("name"), payeeId: tx.object("payee")?.publicID,
                 note: tx.string("note"),
                 number: tx.string("transactionNumber"), amount: total.plainString, currency: currency,
-                kind: kind.rawValue, reconciled: tx.int("reconciledStatus"), splits: splits))
+                kind: kind.rawValue, reconciled: tx.int("reconciledStatus"), splits: splits,
+                tags: tags(of: tx, splits: splitObjects), location: location(of: tx),
+                originalAmount: foreign ? originalTotal.plainString : nil, originalCurrency: foreign ? txCurrency : nil,
+                exchangeRate: foreign ? tx.decimal("currencyRateToAccountCurrency").plainString : nil))
 
             // Plain single-split transactions are the model for the ones created from the phone.
             if kind != .transfer, splitObjects.count == 1, let split = splitObjects.first, total != 0,
@@ -340,4 +394,12 @@ enum MoneyReader {
             templatesByCategory: templatesByCategory.mapValues(\.template),
             templatesByKind: templatesByKind, idStyle: IDStyle.detect(idSamples))
     }
+}
+
+/// "tag_blue" (older Money) and "tagBlue" (newer) are both "blue"; "tag_no_color" and empty names are no color.
+func tagColor(_ name: String?) -> String? {
+    guard var name, !name.isEmpty else { return nil }
+    if name.hasPrefix("tag_") { name.removeFirst(4) } else if name.hasPrefix("tag") { name.removeFirst(3) }
+    name = name.lowercased()
+    return name.isEmpty || name == "no_color" ? nil : name
 }

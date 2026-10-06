@@ -56,6 +56,19 @@
     <string name="pending_explainer">The transaction will be sent to Money once the phone connects to the Mac.</string>
     <string name="pending_retry">Send again</string>
 
+    <!-- Transaction details -->
+    <string name="details_date">Date</string>
+    <string name="details_number">Number</string>
+    <string name="details_location">Location</string>
+    <string name="details_open_map">Open in Maps</string>
+    <string name="details_no_map_app">No maps app to show the location</string>
+    <string name="details_original_amount">Original amount</string>
+    <string name="details_exchange_rate">Rate %1$s = %2$s</string>
+    <string name="details_transfer_to">To %s</string>
+    <string name="details_transfer_from">From %s</string>
+    <string name="details_splits">Split</string>
+    <string name="details_payee_history">More with %s</string>
+
     <!-- Add transaction -->
     <string name="add_title">New transaction</string>
     <string name="add_connect_first">Connect to the Mac first to download accounts and categories.</string>

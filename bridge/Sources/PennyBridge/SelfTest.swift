@@ -103,6 +103,16 @@ enum SelfTest {
         let seededPage = try call("GET", "\(base)/transactions?accountId=\(ids.account)", token: token)
         let seededItems = seededPage.json["items"] as? [[String: Any]] ?? []
         check(seededItems.contains { $0["payeeId"] as? String == ids.lidl }, "transaction links its payee")
+        let shopping = seededItems.first { $0["payeeId"] as? String == ids.lidl }
+        let tags = (shopping?["tags"] as? [[String: Any]] ?? []).map { "\($0["name"] ?? "-")/\($0["color"] ?? "none")" }
+        check(tags == ["Dom/none", "Zakupy/red"], "tags with their colors (\(tags))")
+        let place = shopping?["location"] as? [String: Any]
+        check(place?["street"] as? String == "Puławska 2" && place?["latitude"] as? Double == 52.2, "transaction location")
+        check(shopping?["originalAmount"] == nil, "no original amount in the account's own currency")
+        let paid = seededItems.first { $0["amount"] as? String == "100" }
+        check(paid?["originalAmount"] as? String == "23.5" && paid?["originalCurrency"] as? String == "EUR"
+              && paid?["exchangeRate"] as? String == "4.2553", "foreign currency amount and rate")
+        check((paid?["tags"] as? [Any])?.isEmpty == true && paid?["location"] == nil, "no tags or location")
 
         print("Writing")
         let clientId = UUID().uuidString
@@ -209,14 +219,23 @@ enum SelfTest {
             lidl.setValue(make("Icon", ["content": DemoData.monogram("L", color: .systemBlue)!]), forKey: "icon")
             let salary = make("Category", ["name": "Pensja", "categoryType": 9999, "defaultTransactionType": 11])
             _ = make("Category", ["name": "Balance Adjustment", "categoryType": 30, "defaultTransactionType": -1])
-            for (type, amount, category) in [(21, "-10", food), (11, "100", salary)] {
+            // The salary came in euros: Money keeps them in `amount` and the złoty in `amountInAccountCurrency`.
+            for (type, amount, original, category) in [(21, "-10", "-10", food), (11, "100", "23.5", salary)] {
                 let tx = make("Transaction", [
                     "account": account, "date": Date(timeIntervalSinceNow: -86400), "transactionType": type,
-                    "isScheduledTransaction": false, "readonly": false, "currencyCode": "PLN",
+                    "isScheduledTransaction": false, "readonly": false,
+                    "currencyCode": category === salary ? "EUR" : "PLN",
+                    "currencyRateToAccountCurrency": NSDecimalNumber(string: category === salary ? "4.2553" : "1"),
                 ])
-                if category === food { tx.setValue(lidl, forKey: "payee") }
+                if category === food {
+                    tx.setValue(lidl, forKey: "payee")
+                    tx.setValue(NSSet(array: [make("Tag", ["name": "Zakupy", "colorName": "tag_red"]),
+                                              make("Tag", ["name": "Dom", "colorName": "tag_no_color"])]), forKey: "tags")
+                    tx.setValue(make("PayeePlacemark", ["payee": lidl, "street": "Puławska 2", "city": "Warszawa",
+                                                        "latitude": 52.2, "longitude": 21.02]), forKey: "placemark")
+                }
                 _ = make("TransactionSplit", [
-                    "transaction": tx, "amount": NSDecimalNumber(string: amount),
+                    "transaction": tx, "amount": NSDecimalNumber(string: original),
                     "amountInAccountCurrency": NSDecimalNumber(string: amount), "category": category, "type": 7,
                 ])
             }

@@ -3,9 +3,10 @@
 An Android app for viewing and adding transactions in **Money** (Jumsoft), synced through iCloud.
 
 <p align="center">
-  <img src="docs/screenshots/home.png" width="250" alt="Accounts grouped by folder with balances">
-  <img src="docs/screenshots/recent.png" width="250" alt="Recent transactions across all accounts">
-  <img src="docs/screenshots/add.png" width="250" alt="Adding a new transaction">
+  <img src="docs/screenshots/home.png" width="200" alt="Accounts grouped by folder with balances">
+  <img src="docs/screenshots/recent.png" width="200" alt="Recent transactions across all accounts">
+  <img src="docs/screenshots/details.png" width="200" alt="Details of a transaction paid in euros, with tags and a location">
+  <img src="docs/screenshots/add.png" width="200" alt="Adding a new transaction">
 </p>
 
 ## How it works
@@ -28,6 +29,9 @@ Android (Penny) ⇄ Wi-Fi ⇄ penny-bridge (Mac) ⇄ local Money database ⇄ Mo
 - **Icons:** transactions show the payee's logo from Money, or else the category's icon (Money's built-in glyphs,
   taken from Money.app). The phone downloads them once and keeps them for offline use. Icons only go one way: nothing
   the phone adds carries an icon, and a payee created from the phone has none until you give it one in Money.
+- **Details:** tapping a transaction opens a sheet with everything Money knows about it: date and time, account,
+  category or splits, note, number, tags, the original amount and rate for payments in another currency, and the
+  location (opens in your maps app). It also lists your other transactions with the same payee, as Money does.
 
 ## Installing on the Mac
 

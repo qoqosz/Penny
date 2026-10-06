@@ -13,12 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,11 +32,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.penny.R
-import app.penny.data.IconStore
 import app.penny.data.PendingTransaction
 import app.penny.data.Repository
 import app.penny.data.Snapshot
@@ -95,39 +97,36 @@ fun AmountText(amount: String, currency: String, style: androidx.compose.ui.text
 }
 
 @Composable
-fun TransactionRow(tx: Transaction, snapshot: Snapshot?, icons: IconStore, showAccount: Boolean) {
+fun TransactionRow(
+    tx: Transaction,
+    snapshot: Snapshot?,
+    repository: Repository,
+    showAccount: Boolean,
+    onOpen: (Transaction) -> Unit,
+) {
+    val info = transactionInfo(tx, snapshot)
     val accountName = snapshot?.accounts?.firstOrNull { it.id == tx.accountId }?.name
-    val transferTo = tx.splits.firstNotNullOfOrNull { it.transferAccountId }
-        ?.let { id -> snapshot?.accounts?.firstOrNull { it.id == id }?.name }
-    val category = when {
-        transferTo != null -> stringResource(
-            if (tx.amountValue.signum() < 0) R.string.transfer_to else R.string.transfer_from, transferTo,
-        )
-        tx.splits.size > 1 -> stringResource(R.string.split_count, tx.splits.size)
-        else -> tx.splits.firstOrNull()?.category
-    }
-    val title = tx.payee?.takeIf { it.isNotBlank() } ?: category ?: tx.note ?: stringResource(R.string.transaction)
-    val subtitle = listOfNotNull(
-        category.takeIf { title != category },
+    val details = listOfNotNull(
+        info.category.takeIf { info.title != it },
         accountName.takeIf { showAccount },
-        tx.note.takeIf { !it.isNullOrBlank() && title != it },
+        tx.note.takeIf { !it.isNullOrBlank() && info.title != it },
     ).joinToString(" · ")
-    // Like Money: the payee's logo, else the category's icon.
-    val logo = rememberMoneyIcon(icons, snapshot?.payee(tx.payeeId)?.iconId)
-    val glyph = rememberMoneyIcon(icons, snapshot?.category(tx.splits.singleOrNull()?.categoryId)?.iconId)
+    // Like Money: colored dots for the tags, then their names.
+    val tagColors = tx.tags.map { TagColors.of(it.color) }
+    val subtitle = buildAnnotatedString {
+        append(details)
+        if (tx.tags.isNotEmpty()) {
+            if (details.isNotEmpty()) append(" · ")
+            tagColors.filterNotNull().forEach { withStyle(SpanStyle(color = it)) { append("●") } }
+            if (tagColors.any { it != null }) append(" ")
+            append(tx.tags.joinToString(" ") { "#" + it.name })
+        }
+    }
     ListRow(
-        leading = {
-            when {
-                logo != null -> PayeeLogo(logo)
-                transferTo != null -> Icon(
-                    Icons.Outlined.SwapHoriz, contentDescription = stringResource(R.string.transfer),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                glyph != null -> CategoryGlyph(glyph)
-                else -> KindDot(positive = tx.amountValue.signum() > 0)
-            }
-        },
-        title = title,
+        modifier = Modifier.clickable { onOpen(tx) },
+        leadingSize = 40.dp,
+        leading = { TransactionAvatar(tx, info, snapshot, repository, size = 40) },
+        title = info.title,
         subtitle = subtitle,
         trailing = { AmountText(tx.amount, tx.currency) },
     )
@@ -186,6 +185,16 @@ fun ListRow(
     modifier: Modifier = Modifier,
     leading: @Composable () -> Unit = {},
     trailing: @Composable () -> Unit = {},
+) = ListRow(title, AnnotatedString(subtitle), modifier, 32.dp, leading, trailing)
+
+@Composable
+fun ListRow(
+    title: String,
+    subtitle: AnnotatedString,
+    modifier: Modifier = Modifier,
+    leadingSize: Dp = 32.dp,
+    leading: @Composable () -> Unit = {},
+    trailing: @Composable () -> Unit = {},
 ) {
     Row(
         modifier
@@ -193,7 +202,7 @@ fun ListRow(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { leading() }
+        Box(Modifier.size(leadingSize), contentAlignment = Alignment.Center) { leading() }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -209,15 +218,6 @@ fun ListRow(
     }
 }
 
-@Composable
-private fun KindDot(positive: Boolean) {
-    Box(
-        Modifier
-            .size(10.dp)
-            .background(if (positive) AmountColors.income else MaterialTheme.colorScheme.outlineVariant, CircleShape)
-    )
-}
-
 /** Pending transactions first, then confirmed ones grouped by day. */
 fun LazyListScope.transactionItems(
     transactions: List<Transaction>,
@@ -225,6 +225,7 @@ fun LazyListScope.transactionItems(
     snapshot: Snapshot?,
     repository: Repository,
     showAccount: Boolean,
+    onOpen: (Transaction) -> Unit,
 ) {
     if (pending.isNotEmpty()) {
         item(key = "pending-header") { SectionHeader(stringResource(R.string.pending_header, pending.size)) }
@@ -232,7 +233,7 @@ fun LazyListScope.transactionItems(
     }
     transactions.groupBy { Format.localDate(it.instant) }.forEach { (day, dayItems) ->
         item(key = "d-$day") { SectionHeader(Format.dayHeader(day)) }
-        items(dayItems, key = { "t-" + it.id }) { TransactionRow(it, snapshot, repository.icons, showAccount) }
+        items(dayItems, key = { "t-" + it.id }) { TransactionRow(it, snapshot, repository, showAccount, onOpen) }
     }
 }
 

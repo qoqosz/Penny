@@ -56,6 +56,19 @@
     <string name="pending_explainer">Transakcja zostanie wysłana do Money, gdy telefon połączy się z Makiem.</string>
     <string name="pending_retry">Wyślij ponownie</string>
 
+    <!-- Transaction details -->
+    <string name="details_date">Data</string>
+    <string name="details_number">Numer</string>
+    <string name="details_location">Miejsce</string>
+    <string name="details_open_map">Otwórz w Mapach</string>
+    <string name="details_no_map_app">Brak aplikacji z mapami</string>
+    <string name="details_original_amount">Kwota oryginalna</string>
+    <string name="details_exchange_rate">Kurs %1$s = %2$s</string>
+    <string name="details_transfer_to">Na %s</string>
+    <string name="details_transfer_from">Z %s</string>
+    <string name="details_splits">Podział</string>
+    <string name="details_payee_history">Inne transakcje: %s</string>
+
     <!-- Add transaction -->
     <string name="add_title">Nowa transakcja</string>
     <string name="add_connect_first">Najpierw połącz się z Makiem, aby pobrać konta i kategorie.</string>
