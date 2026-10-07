@@ -53,6 +53,16 @@
     <string name="report_securities">Securities are valued at each day\'s market price.</string>
     <string name="report_unvalued">Some securities have no price or exchange rate and count as zero.</string>
     <string name="no_transactions">No transactions</string>
+    <string name="action_search">Search</string>
+    <string name="action_close_search">Close search</string>
+    <string name="action_clear_search">Clear search</string>
+    <string name="search_hint">Search transactions</string>
+    <string name="search_empty">No transactions match “%s”</string>
+    <string name="search_unavailable">Search works once all transactions have been downloaded from the Mac. Refresh while it is reachable.</string>
+    <plurals name="search_results">
+        <item quantity="one">%d transaction found</item>
+        <item quantity="other">%d transactions found</item>
+    </plurals>
 
     <!-- Report -->
     <string name="tab_report">Report</string>

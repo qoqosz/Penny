@@ -1,5 +1,6 @@
 package app.penny.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,17 +14,28 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,11 +43,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -46,6 +64,7 @@ import app.penny.data.Repository
 import app.penny.data.Snapshot
 import app.penny.data.SyncStatus
 import app.penny.data.Transaction
+import app.penny.data.TransactionSearch
 import kotlinx.coroutines.launch
 
 @Composable
@@ -241,5 +260,78 @@ fun LazyListScope.transactionItems(
 fun EmptyState(text: String, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
         Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** The search button of a top bar with a transaction list. */
+@Composable
+fun SearchAction(onClick: () -> Unit) {
+    IconButton(onClick = onClick) { Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.action_search)) }
+}
+
+/** The top bar while searching: a search field in place of the title. Back (or the system back) closes the search. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchTopAppBar(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    BackHandler(onBack = onClose)
+    TopAppBar(
+        navigationIcon = {
+            IconButton(onClick = onClose) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_close_search))
+            }
+        },
+        title = { SearchField(query, onQueryChange, Modifier.fillMaxWidth().focusRequester(focus), onSearch = { keyboard?.hide() }) },
+        actions = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange(""); focus.requestFocus() }) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_clear_search))
+                }
+            }
+        },
+    )
+}
+
+/** A borderless single-line field for a search; [onSearch] runs on the keyboard's search key. */
+@Composable
+fun SearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier, onSearch: () -> Unit) {
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = modifier,
+        placeholder = { Text(stringResource(R.string.search_hint), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+    )
+}
+
+/** The pending transactions a search finds (all of them without one). */
+@Composable
+fun matchingPending(pending: List<PendingTransaction>, query: String, snapshot: Snapshot?): List<PendingTransaction> =
+    remember(pending, query, snapshot) {
+        val search = TransactionSearch(query)
+        if (search.isEmpty) pending else pending.filter { search.matches(it.request, snapshot) }
+    }
+
+/** How many transactions a search found, above the results. */
+fun LazyListScope.searchSummary(list: TransactionListState, pendingCount: Int) {
+    val count = list.total + pendingCount
+    if (!list.searching || count == 0) return
+    item(key = "search-summary") {
+        Text(
+            pluralStringResource(R.plurals.search_results, count, count),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        )
     }
 }

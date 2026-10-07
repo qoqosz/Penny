@@ -1,6 +1,7 @@
 package app.penny.data
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -207,6 +209,18 @@ class Repository(
             withReconnect(bridge) { client.transactions(it, accountId, offset, limit) }
         } catch (e: UnreachableException) {
             local?.page(accountId, offset, limit) ?: throw e
+        }
+    }
+
+    /**
+     * The transactions matching [search] (in one account, or all when [accountId] is null), newest first. The Mac can't
+     * search, so this always uses the offline copy, even an older one.
+     */
+    suspend fun searchTransactions(accountId: String?, search: TransactionSearch): List<Transaction> {
+        val local = offline.current() ?: throw SearchUnavailableException()
+        val snapshot = _state.value.snapshot
+        return withContext(Dispatchers.Default) {
+            search.filter(if (accountId == null) local.items else local.items.filter { it.accountId == accountId }, snapshot)
         }
     }
 

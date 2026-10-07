@@ -55,6 +55,18 @@
     <string name="report_securities">Papiery wartościowe według ceny rynkowej z każdego dnia.</string>
     <string name="report_unvalued">Niektóre papiery nie mają ceny lub kursu i liczą się jako zero.</string>
     <string name="no_transactions">Brak transakcji</string>
+    <string name="action_search">Szukaj</string>
+    <string name="action_close_search">Zamknij wyszukiwanie</string>
+    <string name="action_clear_search">Wyczyść wyszukiwanie</string>
+    <string name="search_hint">Szukaj transakcji</string>
+    <string name="search_empty">Brak transakcji pasujących do „%s”</string>
+    <string name="search_unavailable">Wyszukiwanie zadziała, gdy wszystkie transakcje zostaną pobrane z Maca. Odśwież, gdy Mac będzie dostępny.</string>
+    <plurals name="search_results">
+        <item quantity="one">Znaleziono %d transakcję</item>
+        <item quantity="few">Znaleziono %d transakcje</item>
+        <item quantity="many">Znaleziono %d transakcji</item>
+        <item quantity="other">Znaleziono %d transakcji</item>
+    </plurals>
 
     <!-- Report -->
     <string name="tab_report">Raport</string>

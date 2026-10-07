@@ -71,22 +71,32 @@ fun AccountScreen(
     // Investment accounts are a portfolio and transactions, on tabs like the home screen's.
     val investment = account != null && account.hasInvestments && valuation?.knowsHoldings == true
     var tab by rememberSaveable { mutableStateOf(0) }
+    // The transactions are searchable, not the portfolio; leaving them ends the search.
+    var searching by rememberSaveable { mutableStateOf(false) }
+    val query by transactions.query.collectAsStateWithLifecycle()
+    fun closeSearch() {
+        searching = false
+        transactions.search("")
+    }
+    val showsTransactions = !(investment && tab == 0)
 
     Scaffold(
         topBar = {
             Column {
-                TopAppBar(
+                if (searching) SearchTopAppBar(query, transactions::search, ::closeSearch)
+                else TopAppBar(
                     title = { Text(account?.name ?: stringResource(R.string.account), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
+                    actions = { if (showsTransactions) SearchAction { searching = true } },
                 )
                 StatusBanner(app.status)
                 if (investment) {
                     PrimaryTabRow(selectedTabIndex = tab) {
-                        Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.portfolio)) })
+                        Tab(selected = tab == 0, onClick = { closeSearch(); tab = 0 }, text = { Text(stringResource(R.string.portfolio)) })
                         Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.transactions)) })
                     }
                 }
@@ -103,7 +113,7 @@ fun AccountScreen(
             onRefresh = { scope.launch { repository.refresh(); transactions.reload() } },
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-            if (investment && tab == 0) {
+            if (!showsTransactions) {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
                     item(key = "header") { BalanceCard(account!!, securities, list.total, cashOnly = false) }
                     if (holdings.isEmpty()) {
@@ -115,14 +125,18 @@ fun AccountScreen(
                 }
             } else {
                 LoadMoreEffect(listState, list.canLoadMore) { transactions.loadMore() }
+                ScrollToTopOnSearch(listState, list.query)
+                val shownPending = matchingPending(pending, list.query, app.snapshot)
                 LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
-                    if (account != null && !investment) {
+                    searchSummary(list, shownPending.size)
+                    // While searching, the count of matches takes the place of the balance.
+                    if (account != null && !investment && !list.searching) {
                         item(key = "header") {
                             BalanceCard(account, securities, list.total,
                                 cashOnly = account.hasInvestments && valuation?.knowsHoldings != true)
                         }
                     }
-                    transactionItems(list.items, pending, app.snapshot, repository, showAccount = false) { selected = it }
+                    transactionItems(list.items, shownPending, app.snapshot, repository, showAccount = false) { selected = it }
                     listFooter(list)
                 }
             }

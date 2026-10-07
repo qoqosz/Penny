@@ -81,6 +81,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import java.math.BigDecimal
 import java.time.YearMonth
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import app.penny.data.TransactionSearch
+import kotlinx.coroutines.delay
 
 private val transactionSaver = Saver<Transaction?, String>(
     save = { it?.let { tx -> Json.encodeToString(Transaction.serializer(), tx) } },
@@ -376,7 +388,19 @@ private fun PayeeTransactionsSheet(
     onSelect: (Transaction) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val months = remember(all) { all.groupBy { YearMonth.from(Format.localDate(it.instant)) }.toList() }
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var text by rememberSaveable { mutableStateOf("") }
+    // The months follow the typed text a moment after the last key press (at once when it's cleared).
+    var query by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(text) {
+        if (text.isNotBlank()) delay(TransactionsViewModel.SEARCH_DELAY_MS)
+        query = text.trim()
+    }
+    val shown = remember(all, query, snapshot) { TransactionSearch(query).filter(all, snapshot) }
+    val months = remember(shown) { shown.groupBy { YearMonth.from(Format.localDate(it.instant)) }.toList() }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(searching) { if (searching) focus.requestFocus() }
+    val keyboard = LocalSoftwareKeyboardController.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -390,7 +414,7 @@ private fun PayeeTransactionsSheet(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TransactionAvatar(tx, transactionInfo(tx, snapshot), snapshot, repository, size = 48)
                     Spacer(Modifier.width(16.dp))
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text(
                             tx.payee ?: stringResource(R.string.transaction), style = MaterialTheme.typography.titleLarge,
                             maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -401,7 +425,29 @@ private fun PayeeTransactionsSheet(
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (!searching) SearchAction { searching = true }
                 }
+            }
+            if (searching) {
+                item(key = "search") {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        placeholder = { Text(stringResource(R.string.search_hint), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        trailingIcon = {
+                            IconButton(onClick = { searching = false; text = "" }) {
+                                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close_search))
+                            }
+                        },
+                        singleLine = true,
+                        shape = CircleShape,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                    )
+                }
+                if (shown.isEmpty()) item(key = "empty") { EmptyState(stringResource(R.string.search_empty, query)) }
             }
             items(months, key = { it.first.toString() }) { (month, items) ->
                 Column {

@@ -82,13 +82,26 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(0) }
     val syncing = app.status == SyncStatus.Syncing
+    // Only the Recent tab is searchable; leaving it ends the search.
+    var searching by rememberSaveable { mutableStateOf(false) }
+    val query by recent.query.collectAsStateWithLifecycle()
+    fun closeSearch() {
+        searching = false
+        recent.search("")
+    }
+    fun selectTab(index: Int) {
+        if (index != 1) closeSearch()
+        tab = index
+    }
 
     Scaffold(
         topBar = {
             Column {
-                TopAppBar(
+                if (searching) SearchTopAppBar(query, recent::search, ::closeSearch)
+                else TopAppBar(
                     title = { Text(stringResource(R.string.app_name)) },
                     actions = {
+                        if (tab == 1) SearchAction { searching = true }
                         if (syncing) {
                             CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
                         } else {
@@ -103,9 +116,9 @@ fun HomeScreen(
                 )
                 StatusBanner(app.status)
                 PrimaryTabRow(selectedTabIndex = tab) {
-                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.tab_accounts)) })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.tab_recent)) })
-                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text(stringResource(R.string.tab_report)) })
+                    Tab(selected = tab == 0, onClick = { selectTab(0) }, text = { Text(stringResource(R.string.tab_accounts)) })
+                    Tab(selected = tab == 1, onClick = { selectTab(1) }, text = { Text(stringResource(R.string.tab_recent)) })
+                    Tab(selected = tab == 2, onClick = { selectTab(2) }, text = { Text(stringResource(R.string.tab_report)) })
                 }
             }
         },
@@ -301,9 +314,12 @@ private fun RecentList(repository: Repository, vm: TransactionsViewModel) {
     val list by vm.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     LoadMoreEffect(listState, list.canLoadMore) { vm.loadMore() }
+    ScrollToTopOnSearch(listState, list.query)
     var selected by rememberSelectedTransaction()
+    val pending = matchingPending(app.pending, list.query, app.snapshot)
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
-        transactionItems(list.items, app.pending, app.snapshot, repository, showAccount = true) { selected = it }
+        searchSummary(list, pending.size)
+        transactionItems(list.items, pending, app.snapshot, repository, showAccount = true) { selected = it }
         listFooter(list)
     }
     selected?.let { tx ->
@@ -318,7 +334,20 @@ fun androidx.compose.foundation.lazy.LazyListScope.listFooter(list: TransactionL
                 CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             }
             list.error != null -> EmptyState(list.error.userMessage())
+            list.items.isEmpty() && list.searching -> EmptyState(stringResource(R.string.search_empty, list.query))
             list.items.isEmpty() -> EmptyState(stringResource(R.string.no_transactions))
+        }
+    }
+}
+
+/** Shows the first results when the search changes (but not when the list comes back into view). */
+@Composable
+fun ScrollToTopOnSearch(state: LazyListState, query: String) {
+    var shown by rememberSaveable { mutableStateOf(query) }
+    LaunchedEffect(query) {
+        if (query != shown) {
+            shown = query
+            state.scrollToItem(0)
         }
     }
 }

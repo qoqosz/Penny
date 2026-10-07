@@ -18,14 +18,19 @@ import app.penny.data.ReportPeriod
 import app.penny.data.Reports
 import app.penny.data.Repository
 import app.penny.data.Transaction
+import app.penny.data.TransactionPage
+import app.penny.data.TransactionSearch
+import app.penny.data.SearchUnavailableException
 import app.penny.data.UnreachableException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOn
@@ -44,6 +49,7 @@ import java.time.ZonedDateTime
 fun Throwable.userMessage(): String = when (this) {
     is UnreachableException -> stringResource(R.string.error_unreachable)
     is NotPairedException -> stringResource(R.string.error_not_paired)
+    is SearchUnavailableException -> stringResource(R.string.search_unavailable)
     else -> message ?: toString()
 }
 
@@ -52,21 +58,43 @@ data class TransactionListState(
     val total: Int = 0,
     val loading: Boolean = false,
     val error: Throwable? = null,
+    /** The search the list is filtered by (trimmed), or "" for every transaction. */
+    val query: String = "",
 ) {
     val canLoadMore get() = items.size < total
+    val searching get() = query.isNotEmpty()
 }
 
-/** Paged transactions for one account (or all accounts when [accountId] is null). */
+/** Paged transactions for one account (or all accounts when [accountId] is null), optionally filtered by a search. */
+@OptIn(FlowPreview::class)
 class TransactionsViewModel(private val repository: Repository, private val accountId: String?) : ViewModel() {
     private val _state = MutableStateFlow(TransactionListState())
     val state: StateFlow<TransactionListState> = _state.asStateFlow()
     private var job: Job? = null
+
+    /** What is typed in the search field, right away; the list follows it [SEARCH_DELAY_MS] after the last key press. */
+    private val _query = MutableStateFlow("")
+    val query: StateFlow<String> = _query.asStateFlow()
+    /** Every match of the current search; pages are slices of it. */
+    private var matches: List<Transaction> = emptyList()
+    /** The search the shown items were loaded for. */
+    private var itemsQuery = ""
 
     init {
         reload()
         viewModelScope.launch {
             repository.state.map { it.dataVersion }.distinctUntilChanged().drop(1).collect { reload() }
         }
+        viewModelScope.launch {
+            // Clearing the search shows everything again at once.
+            _query.debounce { if (it.isBlank()) 0L else SEARCH_DELAY_MS }
+                .map { it.trim() }.distinctUntilChanged().drop(1)
+                .collect { query -> _state.update { it.copy(query = query) }; reload() }
+        }
+    }
+
+    fun search(text: String) {
+        _query.value = text
     }
 
     fun reload() = load(offset = 0)
@@ -78,10 +106,11 @@ class TransactionsViewModel(private val repository: Repository, private val acco
 
     private fun load(offset: Int) {
         job?.cancel()
+        val query = _state.value.query
         job = viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
             try {
-                val page = repository.transactions(accountId, offset)
+                val page = if (query.isEmpty()) repository.transactions(accountId, offset) else searchPage(query, offset)
                 _state.update {
                     it.copy(
                         // Pages can come from different sources (Mac, offline copy), so drop repeats; list keys must be unique.
@@ -89,11 +118,25 @@ class TransactionsViewModel(private val repository: Repository, private val acco
                         total = page.total, loading = false,
                     )
                 }
+                itemsQuery = query
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _state.update { it.copy(loading = false, error = e) }
+                // Keep what is shown, unless it was for another search.
+                _state.update {
+                    if (itemsQuery == query) it.copy(loading = false, error = e)
+                    else it.copy(items = emptyList(), total = 0, loading = false, error = e)
+                }
             }
         }
+    }
+
+    private suspend fun searchPage(query: String, offset: Int): TransactionPage {
+        if (offset == 0) matches = repository.searchTransactions(accountId, TransactionSearch(query))
+        return TransactionPage("", matches.size, offset, matches.drop(offset).take(Repository.PAGE_SIZE))
+    }
+
+    companion object {
+        const val SEARCH_DELAY_MS = 500L
     }
 }
 
