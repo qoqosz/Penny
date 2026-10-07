@@ -12,6 +12,10 @@ struct NewTransactionRequest: Codable {
     let categoryId: String?
     let payeeName: String?
     let note: String?
+    /// Set when the amount is in another currency than the account's: one of Money's currencies,
+    /// and how much one unit of it is in the account's currency.
+    let currency: String?
+    let exchangeRate: String?
 }
 
 struct CreatedRecord: Codable {
@@ -82,7 +86,8 @@ final class TransactionWriter {
         created[request.clientId] = CreatedRecord(transactionId: transactionID, created: Date())
         let cutoff = Date().addingTimeInterval(-180 * 86400)
         try? JSONFile.write(created.filter { $0.value.created > cutoff }, to: Paths.created)
-        Log.info("Added transaction \(transactionID): \(plan.signedAmount.plainString) in account “\(plan.account.name)”")
+        let foreign = plan.currency == plan.account.currency ? "" : " \(plan.currency) at \(plan.rate.plainString)"
+        Log.info("Added transaction \(transactionID): \(plan.signedAmount.plainString)\(foreign) in account “\(plan.account.name)”")
         return transactionID
     }
 
@@ -91,9 +96,15 @@ final class TransactionWriter {
         let account: AccountDTO
         let category: CategoryDTO?
         let template: TransactionTemplate
+        /// In `currency`.
         let signedAmount: Decimal
+        let currency: String
+        /// One unit of `currency` in the account's currency (1 when they're the same).
+        let rate: Decimal
         let payeeName: String?
         let note: String?
+
+        var amountInAccountCurrency: Decimal { signedAmount * rate }
     }
 
     private func validate(_ r: NewTransactionRequest, snapshot: MoneySnapshot) throws -> Plan {
@@ -112,6 +123,18 @@ final class TransactionWriter {
             }
             category = c
         }
+        var currency = account.currency, rate = Decimal(1)
+        if let code = r.currency, code != account.currency {
+            guard snapshot.currencies.contains(code) else {
+                throw BridgeError.invalid("Waluty \(code) nie ma w ustawieniach Money. Dodaj ją na Macu.",
+                                          en: "\(code) isn't one of Money's currencies. Add it in Money's settings on the Mac.")
+            }
+            guard let value = r.exchangeRate.flatMap(Decimal.parse), value > 0, value < 1_000_000 else {
+                throw BridgeError.invalid("Nieprawidłowy kurs wymiany: \(r.exchangeRate ?? "-")", en: "Invalid exchange rate: \(r.exchangeRate ?? "-")")
+            }
+            currency = code
+            rate = value
+        }
         let payee = r.payeeName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let note = r.note?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (payee?.count ?? 0) <= 200, (note?.count ?? 0) <= 2000 else {
@@ -126,7 +149,7 @@ final class TransactionWriter {
                 en: "Money has no template transaction of kind “\(kind.rawValue)”. Add one by hand on the Mac.")
         }
         return Plan(request: r, account: account, category: category, template: template,
-                    signedAmount: kind == .expense ? -amount : amount,
+                    signedAmount: kind == .expense ? -amount : amount, currency: currency, rate: rate,
                     payeeName: payee?.isEmpty == false ? payee : nil, note: note?.isEmpty == false ? note : nil)
     }
 
@@ -170,8 +193,11 @@ final class TransactionWriter {
             tx.setValue(now, forKey: "lastModificationDate")
             tx.setValue(NSNumber(value: Int16(plan.template.transactionType)), forKey: "transactionType")
             tx.setValue(NSNumber(value: Int16(0)), forKey: "reconciledStatus")
-            if plan.template.hasCurrencyCode { tx.setValue(plan.account.currency, forKey: "currencyCode") }
-            tx.setValue(NSDecimalNumber.one, forKey: "currencyRateToAccountCurrency")
+            // Money leaves the code out on some older transactions, but always sets it for another currency.
+            if plan.template.hasCurrencyCode || plan.currency != plan.account.currency {
+                tx.setValue(plan.currency, forKey: "currencyCode")
+            }
+            tx.setValue(NSDecimalNumber(decimal: plan.rate), forKey: "currencyRateToAccountCurrency")
             tx.setValue(plan.payeeName, forKey: "payeeName")
             tx.setValue(payee, forKey: "payee")
             tx.setValue(plan.note, forKey: "note")
@@ -180,10 +206,10 @@ final class TransactionWriter {
             newObjects.append(tx)
 
             let split = NSEntityDescription.insertNewObject(forEntityName: "TransactionSplit", into: ctx)
-            let amount = NSDecimalNumber(decimal: plan.signedAmount)
             split.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
-            split.setValue(amount, forKey: "amount")
-            split.setValue(amount, forKey: "amountInAccountCurrency")
+            // Like Money: the amount in the transaction's currency, and its exact (unrounded) value in the account's.
+            split.setValue(NSDecimalNumber(decimal: plan.signedAmount), forKey: "amount")
+            split.setValue(NSDecimalNumber(decimal: plan.amountInAccountCurrency), forKey: "amountInAccountCurrency")
             split.setValue(NSNumber(value: Int64(plan.template.splitType)), forKey: "type")
             split.setValue(now, forKey: "createdDate")
             // categoryRepresentationString holds the category name from bank imports; manual entries leave it empty.

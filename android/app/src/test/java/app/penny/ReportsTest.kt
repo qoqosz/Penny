@@ -2,6 +2,8 @@ package app.penny
 
 import app.penny.data.Account
 import app.penny.data.Category
+import app.penny.data.ExchangeRates
+import app.penny.data.RateSeries
 import app.penny.data.HiddenAccounts
 import app.penny.data.PeriodType
 import app.penny.data.ReportPeriod
@@ -64,10 +66,19 @@ class ReportsTest {
         categories = categories, payees = emptyList(),
     )
     private val hidden = HiddenAccounts(folders = setOf("hiddenFolder"))
+    private val noRates = ExchangeRates.EMPTY
+
+    /** 1 EUR = 4 PLN until 9 September (a Wednesday), then 5 PLN; USD is published but no account uses it. */
+    private val rates = ExchangeRates(mapOf(
+        "PLN" to RateSeries(listOf(day("2026-08-31"), day("2026-09-09")), listOf("4", "5")),
+        "USD" to RateSeries(listOf(day("2026-08-31")), listOf("1.25")),
+    ))
+
+    private fun day(date: String) = LocalDate.parse(date).toEpochDay()
 
     @Test fun `net worth follows the balances day by day`() {
         val september = ReportPeriod(PeriodType.MONTH, 2026, 9)
-        val report = Reports.build(snapshot, transactions, hidden, "PLN", september, today, zone)
+        val report = Reports.build(snapshot, transactions, hidden, "PLN", noRates, september, today, zone)
         assertEquals(30, report.netWorth.size)
         assertEquals(BigDecimal("1000"), report.startValue)
         assertEquals(BigDecimal("6000"), report.netWorth[0].value)
@@ -79,7 +90,7 @@ class ReportsTest {
 
     @Test fun `a month in progress ends today`() {
         val october = ReportPeriod.current(PeriodType.MONTH, today)
-        val report = Reports.build(snapshot, transactions, hidden, "PLN", october, today, zone)
+        val report = Reports.build(snapshot, transactions, hidden, "PLN", noRates, october, today, zone)
         assertEquals(6, report.netWorth.size)
         assertEquals(BigDecimal("5640"), report.endValue)
         assertEquals(BigDecimal("5640"), snapshot.accounts.take(2).sumOf { it.balanceValue })
@@ -87,7 +98,7 @@ class ReportsTest {
 
     @Test fun `groups categories under their parent and leaves out transfers and system categories`() {
         val september = ReportPeriod(PeriodType.MONTH, 2026, 9)
-        val report = Reports.build(snapshot, transactions, hidden, "PLN", september, today, zone)
+        val report = Reports.build(snapshot, transactions, hidden, "PLN", noRates, september, today, zone)
         assertEquals(listOf("salary"), report.income.map { it.categoryId })
         assertEquals(BigDecimal("5000"), report.totalIncome)
 
@@ -101,10 +112,39 @@ class ReportsTest {
 
     @Test fun `years and currencies`() {
         val year = ReportPeriod(PeriodType.YEAR, 2026, 9)
-        val report = Reports.build(snapshot, transactions, hidden, "EUR", year, today, zone)
+        val report = Reports.build(snapshot, transactions, hidden, "EUR", noRates, year, today, zone)
         assertEquals(279, report.netWorth.size) // 1 January to 6 October
         assertEquals(BigDecimal("999"), report.totalExpenses)
-        assertEquals(listOf("PLN", "EUR"), Reports.currencies(snapshot, hidden))
+        assertEquals(listOf("PLN", "EUR"), Reports.currencies(snapshot, hidden, noRates))
+    }
+
+    @Test fun `converts other currencies at each day's rate`() {
+        val september = ReportPeriod(PeriodType.MONTH, 2026, 9)
+        val report = Reports.build(snapshot, transactions, hidden, "PLN", rates, september, today, zone)
+        assertTrue(report.converted)
+        assertEquals(emptyList<String>(), report.leftOut)
+        // Before 5 September the euro account was empty; then -999 EUR, at 4 PLN and from the 9th at 5 PLN.
+        assertEquals(0, BigDecimal("6000").compareTo(report.netWorth[0].value))
+        assertEquals(0, BigDecimal("5750").subtract(BigDecimal("3996")).compareTo(report.netWorth[4].value))
+        assertEquals(0, BigDecimal("5750").subtract(BigDecimal("4995")).compareTo(report.netWorth[8].value))
+        // The expense counts at the rate of its day: 230 PLN + 999 EUR × 4.
+        val food = report.expenses.first { it.categoryId == "food" }
+        assertEquals(0, BigDecimal("4226").compareTo(food.amount))
+    }
+
+    @Test fun `shows the report in any currency with rates`() {
+        assertEquals(listOf("PLN", "EUR", "USD"), Reports.currencies(snapshot.copy(currencies = listOf("PLN", "EUR", "USD", "GBP")), hidden, rates))
+        val inEuros = Reports.build(snapshot, transactions, hidden, "EUR", rates, ReportPeriod(PeriodType.MONTH, 2026, 10), today, zone)
+        // 5640 PLN at 5 PLN per euro, and the euro account.
+        assertEquals(0, BigDecimal("1128").subtract(BigDecimal("999")).compareTo(inEuros.endValue))
+    }
+
+    @Test fun `leaves out accounts without rates`() {
+        val onlyUsd = ExchangeRates(mapOf("USD" to RateSeries(listOf(day("2026-08-31")), listOf("1.25"))))
+        val report = Reports.build(snapshot, transactions, hidden, "PLN", onlyUsd, ReportPeriod(PeriodType.MONTH, 2026, 9), today, zone)
+        assertEquals(listOf("EUR"), report.leftOut)
+        assertFalse(report.converted)
+        assertEquals(BigDecimal("5740"), report.endValue)
     }
 
     @Test fun `periods move by month or year`() {

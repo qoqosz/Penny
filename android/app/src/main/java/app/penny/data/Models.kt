@@ -114,6 +114,11 @@ data class Snapshot(
     val bridgeVersion: String,
     val writesEnabled: Boolean,
     val defaultCurrency: String? = null,
+    /**
+     * The currencies set up in Money, the default one first. Null from bridges that can only add transactions in the
+     * account's own currency.
+     */
+    val currencies: List<String>? = null,
     val accounts: List<Account>,
     val categories: List<Category>,
     val payees: List<Payee>,
@@ -121,6 +126,18 @@ data class Snapshot(
     // Delegated properties aren't serialized.
     private val payeesById by lazy { payees.associateBy { it.id } }
     private val categoriesById by lazy { categories.associateBy { it.id } }
+
+    /** Money's default currency, or else the one most accounts use. */
+    val mainCurrency: String?
+        get() = defaultCurrency ?: accounts.groupingBy { it.currency }.eachCount().maxByOrNull { it.value }?.key
+
+    /** Every currency that needs exchange rates: Money's own and the accounts'. */
+    val allCurrencies: Set<String>
+        get() = buildSet {
+            mainCurrency?.let(::add)
+            currencies?.let(::addAll)
+            accounts.mapTo(this) { it.currency }
+        } - ""
 
     fun payee(id: String?): Payee? = id?.let(payeesById::get)
     fun category(id: String?): Category? = id?.let(categoriesById::get)
@@ -147,6 +164,10 @@ data class NewTransactionRequest(
     val categoryId: String? = null,
     val payeeName: String? = null,
     val note: String? = null,
+    /** Set when [amount] is in another currency than the account's: one of [Snapshot.currencies]. */
+    val currency: String? = null,
+    /** One unit of [currency] in the account's currency, "." separator. */
+    val exchangeRate: String? = null,
 )
 
 /** A transaction entered on the phone that the Mac hasn't confirmed yet. */

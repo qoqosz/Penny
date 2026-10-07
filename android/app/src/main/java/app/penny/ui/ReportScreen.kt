@@ -89,8 +89,8 @@ fun ReportList(repository: Repository, vm: ReportViewModel) {
         item(key = "controls") {
             PeriodControls(state, onType = vm::setType, onPrevious = vm::previous, onNext = vm::next)
         }
-        if (state.currencies.size > 1 && report != null) {
-            item(key = "currencies") { CurrencyChips(state.currencies, report.currency, vm::setCurrency) }
+        if (report != null && (state.currencies.size > 1 || report.leftOut.isNotEmpty())) {
+            item(key = "currencies") { CurrencyChips(state.currencies, report, vm::setCurrency) }
         }
         if (report == null) {
             item(key = "empty") {
@@ -146,18 +146,23 @@ private fun PeriodControls(state: ReportState, onType: (PeriodType) -> Unit, onP
 }
 
 @Composable
-private fun CurrencyChips(currencies: List<String>, selected: String, onSelect: (String) -> Unit) {
+private fun CurrencyChips(currencies: List<String>, report: Report, onSelect: (String) -> Unit) {
     Column(Modifier.padding(horizontal = 16.dp)) {
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            currencies.forEach { currency ->
-                FilterChip(selected = currency == selected, onClick = { onSelect(currency) }, label = { Text(currency) })
+        if (currencies.size > 1) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                currencies.forEach { currency ->
+                    FilterChip(selected = currency == report.currency, onClick = { onSelect(currency) }, label = { Text(currency) })
+                }
             }
         }
-        Text(
-            stringResource(R.string.report_other_currencies),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        val note = when {
+            report.leftOut.isNotEmpty() -> stringResource(R.string.report_left_out, report.leftOut.joinToString(", "))
+            report.converted -> stringResource(R.string.report_converted)
+            else -> null
+        }
+        if (note != null) {
+            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

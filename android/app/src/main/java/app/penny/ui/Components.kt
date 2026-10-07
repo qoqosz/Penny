@@ -153,7 +153,7 @@ fun PendingRow(item: PendingTransaction, snapshot: Snapshot?, repository: Reposi
         title = r.payeeName ?: category ?: r.note ?: stringResource(R.string.transaction),
         subtitle = if (rejected) stringResource(R.string.pending_rejected_reason, item.rejectedReason.orEmpty())
         else listOfNotNull(stringResource(R.string.pending_waiting_to_send), category, account?.name).joinToString(" · "),
-        trailing = { AmountText(signed, account?.currency ?: snapshot?.defaultCurrency ?: "PLN") },
+        trailing = { AmountText(signed, r.currency ?: account?.currency ?: snapshot?.defaultCurrency ?: "PLN") },
     )
     if (showDialog) {
         AlertDialog(

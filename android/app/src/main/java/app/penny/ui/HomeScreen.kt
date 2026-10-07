@@ -52,12 +52,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
 import app.penny.data.Account
+import app.penny.data.ExchangeRates
 import app.penny.data.HiddenAccounts
 import app.penny.data.Repository
 import app.penny.data.SyncStatus
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
+import java.math.MathContext
+import java.time.LocalDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,6 +76,7 @@ fun HomeScreen(
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
     val hidden by hiddenAccounts.collectAsStateWithLifecycle()
+    val rates by repository.rates.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(0) }
     val syncing = app.status == SyncStatus.Syncing
@@ -120,7 +124,10 @@ fun HomeScreen(
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
             when (tab) {
-                0 -> AccountsList(app.snapshot?.accounts, hidden, app.status, onOpenAccount, onOpenHiddenAccounts)
+                0 -> AccountsList(
+                    app.snapshot?.accounts, app.snapshot?.mainCurrency, rates.rates, hidden, app.status,
+                    onOpenAccount, onOpenHiddenAccounts,
+                )
                 1 -> RecentList(repository, recent)
                 else -> ReportList(repository, report)
             }
@@ -131,6 +138,8 @@ fun HomeScreen(
 @Composable
 private fun AccountsList(
     allAccounts: List<Account>?,
+    mainCurrency: String?,
+    rates: ExchangeRates,
     hidden: HiddenAccounts,
     status: SyncStatus,
     onOpen: (String) -> Unit,
@@ -151,7 +160,7 @@ private fun AccountsList(
     val closedTitle = stringResource(R.string.accounts_closed, closed.size)
     val hiddenCount = allAccounts.orEmpty().size - accounts.size
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-        item(key = "totals") { TotalsCard(open) }
+        item(key = "totals") { TotalsCard(open, mainCurrency, rates) }
         open.groupBy { it.folder ?: defaultFolder }.forEach { (folder, list) ->
             val sums = list.groupBy { it.currency }.map { (cur, a) -> Format.money(a.sumOf { it.balanceValue }, cur) }
             item(key = "f-$folder") { SectionHeader(folder, sums.joinToString(" · ")) }
@@ -181,18 +190,38 @@ private fun AccountsList(
 }
 
 @Composable
-private fun TotalsCard(accounts: List<Account>) {
+private fun TotalsCard(accounts: List<Account>, mainCurrency: String?, rates: ExchangeRates) {
     val totals = accounts.groupBy { it.currency }
         .mapValues { (_, list) -> list.fold(BigDecimal.ZERO) { acc, a -> acc + a.balanceValue } }
         .toList().sortedByDescending { it.second.abs() }
+    // With several currencies and rates for all of them, one total in the main currency at today's rates.
+    val today = LocalDate.now()
+    val converted = mainCurrency?.takeIf { totals.size > 1 }?.let { main ->
+        totals.map { (currency, total) ->
+            total.multiply(rates.rate(currency, main, today) ?: return@let null, MathContext.DECIMAL64)
+        }.fold(BigDecimal.ZERO, BigDecimal::add)
+    }
     Card(
         Modifier.fillMaxWidth().padding(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(stringResource(R.string.totals_title), style = MaterialTheme.typography.labelLarge)
-            totals.forEach { (currency, total) ->
-                Text(Format.money(total, currency), style = MaterialTheme.typography.headlineSmall)
+            if (converted != null && mainCurrency != null) {
+                Text(Format.money(converted, mainCurrency), style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    totals.joinToString(" · ") { (currency, total) -> Format.money(total, currency) },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    stringResource(R.string.totals_converted),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                )
+            } else {
+                totals.forEach { (currency, total) ->
+                    Text(Format.money(total, currency), style = MaterialTheme.typography.headlineSmall)
+                }
             }
             if (accounts.any { it.hasInvestments }) {
                 Text(

@@ -37,6 +37,7 @@ private object Routes {
     const val ADD = "add?accountId={accountId}"
     const val SETTINGS = "settings"
     const val HIDDEN_ACCOUNTS = "settings/hidden"
+    const val CURRENCIES = "settings/currencies"
 
     fun account(id: String) = "account/${android.net.Uri.encode(id)}"
     fun add(accountId: String?) = if (accountId == null) "add" else "add?accountId=${android.net.Uri.encode(accountId)}"
@@ -154,7 +155,11 @@ private fun Screens(app: PennyApplication, nav: NavHostController, startDestinat
                 onBack = { nav.popBackStack() },
                 onUnpaired = toSetup,
                 onOpenHiddenAccounts = { nav.navigate(Routes.HIDDEN_ACCOUNTS) },
+                onOpenCurrencies = { nav.navigate(Routes.CURRENCIES) },
             )
+        }
+        composable(Routes.CURRENCIES) {
+            CurrenciesScreen(repository = repository, onBack = { nav.popBackStack() })
         }
         composable(Routes.HIDDEN_ACCOUNTS) {
             HiddenAccountsScreen(preferences = app.preferences, repository = repository, onBack = { nav.popBackStack() })

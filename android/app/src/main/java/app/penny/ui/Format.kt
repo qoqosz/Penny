@@ -113,4 +113,22 @@ object Format {
         if (!Regex("""\d+(\.\d{1,2})?""").matches(normalized)) return null
         return normalized.toBigDecimalOrNull()?.takeIf { it.signum() > 0 }
     }
+
+    /** The currency's name in the app's language, e.g. "Euro", or the code when Java doesn't know it. */
+    fun currencyName(code: String): String =
+        runCatching { Currency.getInstance(code).getDisplayName(Locale.getDefault()) }.getOrDefault(code)
+            .replaceFirstChar { it.titlecase(Locale.getDefault()) }
+
+    /** An exchange rate typed by the user: like [parseAmount], with up to 8 decimals. */
+    fun parseRate(text: String): BigDecimal? {
+        val normalized = text.replace("\u00A0", "").replace(" ", "").replace(',', '.')
+        if (!Regex("""\d+(\.\d{1,8})?""").matches(normalized)) return null
+        return normalized.toBigDecimalOrNull()?.takeIf { it.signum() > 0 }
+    }
+
+    /** A rate to prefill an input with: 6 decimals at most, with the language's decimal separator. */
+    fun rateInput(rate: BigDecimal): String {
+        val plain = rate.setScale(6, RoundingMode.HALF_EVEN).stripTrailingZeros().toPlainString()
+        return plain.replace('.', java.text.DecimalFormatSymbols.getInstance(Locale.getDefault()).decimalSeparator)
+    }
 }

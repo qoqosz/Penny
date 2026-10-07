@@ -69,6 +69,7 @@ enum SelfTest {
         let snap = try call("GET", "\(base)/snapshot", token: token)
         let accounts = snap.json["accounts"] as? [[String: Any]] ?? []
         check(accounts.count == 1, "1 account")
+        check(snap.json["currencies"] as? [String] == ["PLN", "EUR"], "Money's currencies, the default first (\((snap.json["currencies"] as? [String])?.joined(separator: ", ") ?? "-"))")
         check(accounts.first?["folder"] as? String == "Archiwum" && accounts.first?["folderId"] is String,
               "account folder with an identifier")
         check(accounts.first?["balance"] as? String == "90", "balance 100 - 10 = 90 (got \(accounts.first?["balance"] ?? "-"))")
@@ -149,12 +150,30 @@ enum SelfTest {
         ])
         check(badEN.errorMessage == "Invalid amount: -3", "rejection reason in English (\(badEN.errorMessage ?? "-"))")
 
+        let euros = try call("POST", "\(base)/transactions", token: token, body: [
+            "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-03T10:00:00Z",
+            "kind": "expense", "amount": "10", "categoryId": ids.food, "currency": "EUR", "exchangeRate": "4,25",
+        ])
+        check(euros.status == 201 && euros.json["amount"] as? String == "-42.5", "expense in euros converted (\(euros.json["amount"] ?? euros.text))")
+        check(euros.json["originalAmount"] as? String == "-10" && euros.json["originalCurrency"] as? String == "EUR"
+              && euros.json["exchangeRate"] as? String == "4.25", "original amount, currency and rate kept")
+        let dollars = try call("POST", "\(base)/transactions", token: token, language: "en-US", body: [
+            "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-03T10:00:00Z",
+            "kind": "expense", "amount": "10", "currency": "USD", "exchangeRate": "3.9",
+        ])
+        check(dollars.status == 422 && dollars.errorMessage?.contains("USD") == true, "currency Money doesn't have rejected")
+        let noRate = try call("POST", "\(base)/transactions", token: token, body: [
+            "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-03T10:00:00Z",
+            "kind": "expense", "amount": "10", "currency": "EUR",
+        ])
+        check(noRate.status == 422, "another currency without a rate rejected")
+
         let page = try call("GET", "\(base)/transactions?accountId=\(ids.account)&limit=2", token: token)
-        check(page.json["total"] as? Int == 4, "4 transactions in the account")
+        check(page.json["total"] as? Int == 5, "5 transactions in the account")
         check((page.json["items"] as? [[String: Any]])?.count == 2, "paging")
         let snap2 = try call("GET", "\(base)/snapshot", token: token)
         let balance = (snap2.json["accounts"] as? [[String: Any]])?.first?["balance"] as? String
-        check(balance == "83.16", "balance after writes 90 - 12.34 + 5.5 = 83.16 (got \(balance ?? "-"))")
+        check(balance == "40.66", "balance after writes 90 - 12.34 + 5.5 - 42.5 = 40.66 (got \(balance ?? "-"))")
 
         print("Money database (SQL)")
         let db = try SQLiteDB(path: location.storeURL.path)
@@ -169,7 +188,14 @@ enum SelfTest {
         check(rows.first?["sched"] as? Int64 == 0, "isScheduledTransaction flag copied")
         check(rows.first?["payee"] != nil && rows.first?["fok"] != nil, "payee relationship and ordered split")
         let maxPK = try db.query("SELECT Z_MAX m FROM Z_PRIMARYKEY WHERE Z_NAME = 'Transaction'").first?["m"] as? Int64
-        check(maxPK == 4, "Z_PRIMARYKEY updated")
+        check(maxPK == 5, "Z_PRIMARYKEY updated")
+        let euroRow = try db.query("""
+            SELECT t.ZCURRENCYCODE code, t.ZCURRENCYRATETOACCOUNTCURRENCY rate, s.ZAMOUNT amount, s.ZAMOUNTINACCOUNTCURRENCY acc
+            FROM ZTRANSACTION t JOIN ZTRANSACTIONSPLIT s ON s.ZTRANSACTION = t.Z_PK WHERE t.ZUNIQUEIDENTIFIER = ?
+            """, [euros.json["id"] as? String ?? "?"]).first
+        func number(_ key: String) -> Double? { (euroRow?[key] as? NSNumber)?.doubleValue }
+        check(euroRow?["code"] as? String == "EUR" && number("rate") == 4.25 && number("amount") == -10 && number("acc") == -42.5,
+              "stored like Money's own: euros in amount, złoty in amountInAccountCurrency (\(euroRow ?? [:]))")
         let iconRows = try db.query("SELECT COUNT(*) c FROM ZICON").first?["c"] as? Int64
         check(iconRows == 1, "the phone's transactions add no icons")
         let afterWrites = try call("GET", "\(base)/snapshot", token: token)
@@ -179,12 +205,12 @@ enum SelfTest {
         print("SyncKit")
         let sync = try SQLiteDB(path: location.syncStoreURL!.path)
         let tracked = try sync.query("SELECT ZIDENTIFIER i, ZENTITYTYPE t, ZSTATE s FROM ZQSSYNCEDENTITY WHERE ZSTATE = 0")
-        check(tracked.count == 5, "5 new rows to upload (2× transaction, 2× split, payee) — got \(tracked.count)")
+        check(tracked.count == 7, "7 new rows to upload (3× transaction, 3× split, payee) — got \(tracked.count)")
         check(tracked.contains { $0["i"] as? String == "Transaction.\(createdID)" }, "identifier “Transaction.<uuid>”")
         check(Set(tracked.compactMap { $0["t"] as? String }) == ["Transaction", "TransactionSplit", "Payee"], "entity types")
 
         let backups = (try? FileManager.default.contentsOfDirectory(atPath: Paths.backups.path)) ?? []
-        check(backups.count == 2, "backups before every write")
+        check(backups.count == 3, "backups before every write")
 
         print(failures == 0 ? "\nALL OK" : "\nFAILURES: \(failures)")
         if failures > 0 { exit(1) }
@@ -210,7 +236,8 @@ enum SelfTest {
                 tracked.append((entity, id))
                 return o
             }
-            let pln = make("Currency", ["code": "PLN", "defaultCurrency": true])
+            let pln = make("Currency", ["code": "PLN", "defaultCurrency": true, "sortOrder": 2])
+            _ = make("Currency", ["code": "EUR", "sortOrder": 1])
             let folder = make("Folder", ["name": "Archiwum"])
             let account = make("Account", ["name": "Konto testowe", "currency": pln, "folder": folder])
             let food = make("Category", ["name": "Jedzenie", "categoryType": 9999, "defaultTransactionType": 21,

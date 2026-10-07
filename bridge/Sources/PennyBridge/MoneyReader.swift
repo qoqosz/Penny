@@ -93,6 +93,9 @@ struct SnapshotDTO: Codable {
     let bridgeVersion: String
     let writesEnabled: Bool
     let defaultCurrency: String?
+    /// The currencies set up in Money, the default one first. Transactions can be added in any of them
+    /// (bridges without this field write in the account's currency only).
+    let currencies: [String]
     let accounts: [AccountDTO]
     let categories: [CategoryDTO]
     let payees: [PayeeDTO]
@@ -146,6 +149,7 @@ enum IDStyle: String {
 struct MoneySnapshot {
     let generation: String
     let defaultCurrency: String?
+    let currencies: [String]
     let accounts: [AccountDTO]
     let categories: [CategoryDTO]
     let payees: [PayeeDTO]
@@ -161,7 +165,7 @@ struct MoneySnapshot {
 
     func dto(writesEnabled: Bool) -> SnapshotDTO {
         SnapshotDTO(generation: generation, bridgeVersion: bridgeVersion, writesEnabled: writesEnabled,
-                    defaultCurrency: defaultCurrency, accounts: accounts, categories: categories, payees: payees)
+                    defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts, categories: categories, payees: payees)
     }
 }
 
@@ -177,8 +181,13 @@ enum MoneyReader {
     }
 
     private static func build(_ ctx: NSManagedObjectContext, generation: String, moneyVersion: String) throws -> MoneySnapshot {
-        let currencies = try ctx.fetchAll("Currency")
-        let defaultCurrency = currencies.first { $0.bool("defaultCurrency") }?.string("code")
+        let currencyObjects = try ctx.fetchAll("Currency")
+        let defaultCurrency = currencyObjects.first { $0.bool("defaultCurrency") }?.string("code")
+        // In Money's order (its currency settings), the default one first.
+        var currencies: [String] = defaultCurrency.map { [$0] } ?? []
+        for c in currencyObjects.sorted(by: { $0.int("sortOrder") < $1.int("sortOrder") }) {
+            if let code = c.string("code"), !code.isEmpty, !currencies.contains(code) { currencies.append(code) }
+        }
 
         let accountObjects = try ctx.fetchAll("Account", prefetch: ["currency", "folder"])
         let categoryObjects = try ctx.fetchAll("Category", prefetch: ["parentCategory", "account"])
@@ -389,7 +398,7 @@ enum MoneyReader {
         }.sorted { ($0.usageCount, $1.name) > ($1.usageCount, $0.name) }
 
         return MoneySnapshot(
-            generation: generation, defaultCurrency: defaultCurrency, accounts: accounts,
+            generation: generation, defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts,
             categories: categories, payees: payees, iconSources: iconSources, transactions: transactions,
             templatesByCategory: templatesByCategory.mapValues(\.template),
             templatesByKind: templatesByKind, idStyle: IDStyle.detect(idSamples))

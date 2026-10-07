@@ -1,6 +1,7 @@
 package app.penny.data
 
 import java.math.BigDecimal
+import java.math.MathContext
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -56,6 +57,10 @@ data class Report(
     val expenses: List<CategoryTotal>,
     /** Some accounts are investment accounts, whose securities aren't counted. */
     val hasInvestments: Boolean,
+    /** Accounts in other currencies were converted at each day's exchange rate. */
+    val converted: Boolean = false,
+    /** Currencies of visible accounts that couldn't be converted (no rates), so their accounts are left out. */
+    val leftOut: List<String> = emptyList(),
 ) {
     val endValue: BigDecimal get() = netWorth.lastOrNull()?.value ?: startValue
     val totalIncome: BigDecimal get() = income.fold(BigDecimal.ZERO) { s, c -> s + c.amount }
@@ -63,16 +68,21 @@ data class Report(
 }
 
 object Reports {
-    /** Currencies of the visible accounts: Money's default currency first, then by number of transactions. */
-    fun currencies(snapshot: Snapshot, hidden: HiddenAccounts): List<String> =
-        snapshot.accounts.filterNot { it.isHidden(hidden) }
+    /**
+     * Currencies the report can be shown in: the main one first, then Money's other currencies in Money's order, then
+     * the remaining account currencies by number of transactions. A currency is offered when there are rates for it
+     * (every account can then be converted to it), or when visible accounts are in it (shown on their own).
+     */
+    fun currencies(snapshot: Snapshot, hidden: HiddenAccounts, rates: ExchangeRates): List<String> {
+        val byUsage = snapshot.accounts.filterNot { it.isHidden(hidden) }
             .groupBy { it.currency }
             .entries
-            .sortedWith(
-                compareByDescending<Map.Entry<String, List<Account>>> { it.key == snapshot.defaultCurrency }
-                    .thenByDescending { e -> e.value.sumOf { it.transactionCount } },
-            )
+            .sortedByDescending { e -> e.value.sumOf { it.transactionCount } }
             .map { it.key }
+        return (listOfNotNull(snapshot.mainCurrency) + snapshot.currencies.orEmpty() + byUsage)
+            .distinct()
+            .filter { it in byUsage || rates.covers(it) }
+    }
 
     /** The first day with a transaction in a visible account, or null when there are none. */
     fun firstDate(snapshot: Snapshot, transactions: List<Transaction>, hidden: HiddenAccounts, zone: ZoneId): LocalDate? {
@@ -81,59 +91,83 @@ object Reports {
     }
 
     /**
-     * Net worth and income/expenses by category for the visible accounts in [currency] (closed ones too; they count
-     * for the past). Amounts in other currencies can't be converted without rates, so they're left out.
+     * Net worth and income/expenses by category for the visible accounts (closed ones too; they count for the past),
+     * in [currency]. Accounts in other currencies are converted at each day's rate; without rates they're left out.
      */
     fun build(
         snapshot: Snapshot,
         transactions: List<Transaction>,
         hidden: HiddenAccounts,
         currency: String,
+        rates: ExchangeRates,
         period: ReportPeriod,
         today: LocalDate,
         zone: ZoneId,
     ): Report {
-        val accounts = snapshot.accounts.filter { !it.isHidden(hidden) && it.currency == currency }
-        val accountIds = accounts.mapTo(HashSet()) { it.id }
-        val dated = transactions.filter { it.accountId in accountIds }
+        val visible = snapshot.accounts.filterNot { it.isHidden(hidden) }
+        val (accounts, leftOut) = visible.partition {
+            it.currency == currency || (rates.covers(it.currency) && rates.covers(currency))
+        }
+        val accountCurrency = accounts.associate { it.id to it.currency }
+        val dated = transactions.filter { it.accountId in accountCurrency }
             .map { it.instant.atZone(zone).toLocalDate() to it }
             .sortedBy { it.first }
+        fun inCurrency(amount: BigDecimal, from: String, day: LocalDate): BigDecimal =
+            if (from == currency) amount else amount.multiply(rates.rate(from, currency, day)!!, MATH)
 
-        // Net worth on a day = what there was before the first transaction + everything up to that day. The balances
-        // come from the snapshot, so if the transaction copy is older the line still ends at today's balance.
-        val balance = accounts.fold(BigDecimal.ZERO) { s, a -> s + a.balanceValue }
-        var running = dated.fold(balance) { s, (_, tx) -> s - tx.amountValue }
+        // Net worth on a day = what each currency had before the first transaction + everything up to that day, at
+        // that day's rate. The balances come from the snapshot, so if the transaction copy is older the line still
+        // ends at today's balance.
+        val running = HashMap<String, BigDecimal>()
+        accounts.forEach { running.merge(it.currency, it.balanceValue, BigDecimal::add) }
+        dated.forEach { (_, tx) -> running.merge(accountCurrency.getValue(tx.accountId), tx.amountValue.negate(), BigDecimal::add) }
         var i = 0
-        fun advanceThrough(day: LocalDate) {
-            while (i < dated.size && !dated[i].first.isAfter(day)) running += dated[i++].second.amountValue
+        fun valueThrough(day: LocalDate): BigDecimal {
+            while (i < dated.size && !dated[i].first.isAfter(day)) {
+                val tx = dated[i++].second
+                running.merge(accountCurrency.getValue(tx.accountId), tx.amountValue, BigDecimal::add)
+            }
+            return running.entries.fold(BigDecimal.ZERO) { s, (from, sum) -> s + inCurrency(sum, from, day) }
         }
-        advanceThrough(period.start.minusDays(1))
-        val startValue = running
+        val startValue = valueThrough(period.start.minusDays(1))
         val points = ArrayList<NetWorthPoint>()
         val last = minOf(period.endExclusive.minusDays(1), today)
         var day = period.start
         while (!day.isAfter(last)) {
-            advanceThrough(day)
-            points += NetWorthPoint(day, running)
+            points += NetWorthPoint(day, valueThrough(day))
             day = day.plusDays(1)
         }
 
-        val (income, expenses) = categoryTotals(snapshot, dated.filter { it.first in period }.map { it.second })
-        return Report(period, currency, points, startValue, income, expenses, accounts.any { it.hasInvestments })
+        val inPeriod = dated.filter { it.first in period }.map { (day, tx) ->
+            val from = accountCurrency.getValue(tx.accountId)
+            tx to if (from == currency) BigDecimal.ONE else rates.rate(from, currency, day)!!
+        }
+        val (income, expenses) = categoryTotals(snapshot, inPeriod)
+        return Report(
+            period, currency, points, startValue, income, expenses,
+            hasInvestments = accounts.any { it.hasInvestments },
+            converted = accounts.any { it.currency != currency },
+            leftOut = leftOut.map { it.currency }.distinct(),
+        )
     }
 
     /**
      * Sums the category splits by top-level category; a category is income or an expense by the sign of its total.
      * Transfers and Money's own categories (investments, balance adjustments) aren't income or spending.
      */
-    private fun categoryTotals(snapshot: Snapshot, transactions: List<Transaction>): Pair<List<CategoryTotal>, List<CategoryTotal>> {
+    private fun categoryTotals(
+        snapshot: Snapshot,
+        /** Each with the rate from its account's currency to the report's. */
+        transactions: List<Pair<Transaction, BigDecimal>>,
+    ): Pair<List<CategoryTotal>, List<CategoryTotal>> {
         val byTop = LinkedHashMap<String, MutableMap<String, BigDecimal>>()
         var uncategorizedIn = BigDecimal.ZERO
         var uncategorizedOut = BigDecimal.ZERO
         val unknownNames = HashMap<String, String>()
-        for (tx in transactions) for (split in tx.splits) {
+        for ((tx, rate) in transactions) for (split in tx.splits) {
             if (split.transferAccountId != null) continue
-            val amount = split.amount.toBigDecimalOrNull() ?: continue
+            val amount = split.amount.toBigDecimalOrNull()
+                ?.let { if (rate.compareTo(BigDecimal.ONE) == 0) it else it.multiply(rate, MATH) } ?: continue
             val category = snapshot.category(split.categoryId)
             when {
                 category != null -> {
@@ -169,6 +203,8 @@ object Reports {
         if (uncategorizedOut.signum() != 0) expenses += CategoryTotal(null, null, uncategorizedOut.negate())
         return income.sortedByDescending { it.amount } to expenses.sortedByDescending { it.amount }
     }
+
+    private val MATH = MathContext.DECIMAL64
 
     private fun topLevel(snapshot: Snapshot, category: Category): Category {
         var current = category

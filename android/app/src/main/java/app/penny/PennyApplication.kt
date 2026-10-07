@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.penny.data.AppPreferences
 import app.penny.data.BridgeClient
+import app.penny.data.CurrencyRates
+import app.penny.data.EcbRateSource
 import app.penny.data.Discovery
 import app.penny.data.IconStore
 import app.penny.data.JsonStore
@@ -33,6 +35,8 @@ class PennyApplication : Application() {
             cache = JsonStore(File(filesDir, "cache")),
             queue = PendingQueue(JsonStore(File(filesDir, "queue"))),
             icons = IconStore(File(filesDir, "icons")),
+            // Not tied to the paired Mac, so kept when unpairing.
+            rates = CurrencyRates(JsonStore(File(filesDir, "rates")), EcbRateSource()),
             scope = appScope,
             scheduleSync = { SyncWorker.schedule(this) },
         )

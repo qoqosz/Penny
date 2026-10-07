@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 
 sealed interface SyncStatus {
@@ -35,6 +37,8 @@ class Repository(
     private val cache: JsonStore,
     private val queue: PendingQueue,
     val icons: IconStore,
+    /** Exchange rates for Money's currencies; they come from the ECB, not from the Mac. */
+    val rates: CurrencyRates,
     private val scope: CoroutineScope,
     /** Schedules a background sync (WorkManager) for when the network is back. */
     private val scheduleSync: () -> Unit,
@@ -52,6 +56,7 @@ class Repository(
                 it.copy(snapshot = it.snapshot ?: cached, pending = queue.all(), offlineGeneration = it.offlineGeneration ?: offlineGeneration)
             }
             icons.load()
+            rates.load()
         }
     }
 
@@ -101,6 +106,21 @@ class Repository(
             SyncStatus.Error(e.message.orEmpty())
         }
         _state.update { it.copy(status = status, pending = queue.all()) }
+        // Also without the Mac: the rates come from the internet.
+        scope.launch { updateRates() }
+    }
+
+    /**
+     * Downloads the exchange rates between Money's currencies, back to the first transaction. Without [force],
+     * a recent download is kept.
+     */
+    suspend fun updateRates(force: Boolean = false) {
+        val snapshot = _state.value.snapshot ?: return
+        val currencies = snapshot.allCurrencies
+        if (currencies.size < 2) return
+        val zone = ZoneId.systemDefault()
+        val first = offline.current()?.items?.minOfOrNull { it.instant }?.atZone(zone)?.toLocalDate()
+        rates.update(currencies, first ?: LocalDate.now(zone).minusYears(1), force)
     }
 
     private suspend fun syncIcons(connection: Connection, snapshot: Snapshot) {

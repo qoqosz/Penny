@@ -32,6 +32,7 @@
     <string name="accounts_default_folder">Konta</string>
     <string name="accounts_closed">Zamknięte konta (%d)</string>
     <string name="totals_title">Razem na otwartych kontach</string>
+    <string name="totals_converted">Przeliczono po najnowszych kursach EBC</string>
     <string name="totals_investments_note">Konta inwestycyjne liczone bez wartości papierów</string>
     <string name="balance">Saldo</string>
     <string name="balance_cash">Saldo gotówkowe</string>
@@ -44,7 +45,8 @@
     <string name="report_previous">Poprzedni okres</string>
     <string name="report_next">Następny okres</string>
     <string name="report_empty">Nie pobrano jeszcze transakcji. Przeciągnij w dół, aby pobrać je z Maca.</string>
-    <string name="report_other_currencies">Uwzględniono tylko konta w wybranej walucie.</string>
+    <string name="report_left_out">Konta w walucie %s nie są uwzględnione: brak dla nich kursów wymiany.</string>
+    <string name="report_converted">Inne waluty przeliczono po kursie EBC z każdego dnia.</string>
     <string name="report_net_worth">Majątek netto</string>
     <string name="report_change">%s w tym okresie</string>
     <string name="report_net_worth_chart">Wykres majątku netto, od %1$s do %2$s</string>
@@ -56,6 +58,19 @@
     <string name="report_no_expenses">Brak wydatków w tym okresie</string>
     <string name="report_uncategorized">Bez kategorii</string>
     <string name="report_other">Inne</string>
+
+    <!-- Currencies -->
+    <string name="currencies_title">Waluty</string>
+    <string name="currencies_summary">Penny korzysta z walut ustawionych w Money na Macu (Ustawienia → Waluty). Kursy wymiany to dzienne kursy referencyjne Europejskiego Banku Centralnego, pobierane przez telefon od dnia pierwszej transakcji. Służą do przeliczania raportu i sumy oraz podpowiadają kurs przy dodawaniu transakcji w innej walucie.</string>
+    <string name="currencies_main">Waluta główna</string>
+    <string name="currencies_no_rates">EBC nie publikuje kursów tej waluty</string>
+    <string name="currencies_not_downloaded">Kursy nie zostały jeszcze pobrane</string>
+    <string name="currencies_updated">Kursy pobrano %s</string>
+    <string name="currencies_failed">Nie udało się pobrać kursów. Sprawdź połączenie z internetem.</string>
+    <string name="currencies_download">Pobierz kursy</string>
+    <string name="currencies_single">Money i wszystkie konta używają jednej waluty, więc nie ma czego przeliczać.</string>
+    <string name="currencies_not_connected">Połącz się z Makiem, aby zobaczyć waluty z Money.</string>
+    <string name="currencies_old_bridge">Zaktualizuj penny-bridge na Macu, aby dodawać transakcje w innych walutach.</string>
 
     <!-- Account -->
     <string name="account">Konto</string>
@@ -105,6 +120,15 @@
     <string name="choose_account">Wybierz konto</string>
     <string name="no_category">Bez kategorii</string>
     <string name="error_amount">Podaj kwotę, np. 12,50</string>
+    <string name="field_currency">Waluta</string>
+    <string name="field_rate">Kurs wymiany</string>
+    <string name="rate_prefix">1 %s =\u0020</string>
+    <string name="rate_ecb">Kurs referencyjny EBC z tego dnia</string>
+    <string name="rate_converted">%s w walucie konta</string>
+    <string name="rate_converted_ecb">%s po kursie EBC z tego dnia</string>
+    <string name="rate_missing">Brak kursu EBC dla tego dnia. Wpisz kurs.</string>
+    <string name="rate_use_ecb">Użyj kursu EBC</string>
+    <string name="error_rate">Podaj kurs wymiany, np. 4,25</string>
     <string name="add_footer">Transakcja trafi do Money na Macu przy najbliższym połączeniu, a stamtąd do iCloud.</string>
     <string name="search">Szukaj</string>
     <string name="categories_frequent">Najczęściej używane</string>

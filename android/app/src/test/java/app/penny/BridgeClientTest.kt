@@ -30,7 +30,7 @@ class BridgeClientTest {
 
     @Test fun `parses snapshot as sent by the bridge`() = runTest {
         server.enqueue(MockResponse().setBody("""
-            {"generation":"1:2-3:4","bridgeVersion":"1.0.0","writesEnabled":true,"defaultCurrency":"PLN",
+            {"generation":"1:2-3:4","bridgeVersion":"1.0.0","writesEnabled":true,"defaultCurrency":"PLN","currencies":["PLN","EUR"],
              "accounts":[{"id":"A","name":"Konto","type":2,"currency":"PLN","folder":"Archiwum","folderId":"F1","closed":false,"sortOrder":0,
                           "balance":"83.16","transactionCount":4,"lastTransactionDate":"2026-10-02T08:30:00Z","hasInvestments":false}],
              "categories":[{"id":"C","name":"Groceries","fullName":"Food & Dining › Groceries","parentId":"P","kind":"expense","usageCount":3,"iconId":"c01"}],
@@ -39,6 +39,8 @@ class BridgeClientTest {
         """.trimIndent()))
         val snapshot = client.snapshot(connection)
         assertEquals(BigDecimal("83.16"), snapshot.accounts.single().balanceValue)
+        assertEquals(listOf("PLN", "EUR"), snapshot.currencies)
+        assertEquals(setOf("PLN", "EUR"), snapshot.allCurrencies)
         assertTrue(snapshot.accounts.single().isHidden(HiddenAccounts(folders = setOf("F1"))))
         assertFalse(snapshot.accounts.single().isHidden(HiddenAccounts(folders = setOf("F2"))))
         assertEquals("expense", snapshot.categories.single().kind)
@@ -81,6 +83,16 @@ class BridgeClientTest {
         val body = server.takeRequest().body.readUtf8()
         assertTrue(body.contains("\"amount\":\"12.5\""))
         assertFalse("nulls are omitted", body.contains("categoryId"))
+        assertFalse("no currency for the account's own", body.contains("currency"))
+
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""
+            {"id":"T","accountId":"A","date":"2026-10-03T09:30:00Z","amount":"-42.5","currency":"PLN","kind":"expense",
+             "originalAmount":"-10","originalCurrency":"EUR","exchangeRate":"4.25"}
+        """.trimIndent()))
+        val created = client.create(connection, request.copy(clientId = "id-2", amount = "10", currency = "EUR", exchangeRate = "4.25"))
+        assertEquals("EUR", created.originalCurrency)
+        val euros = server.takeRequest().body.readUtf8()
+        assertTrue(euros.contains("\"currency\":\"EUR\"") && euros.contains("\"exchangeRate\":\"4.25\""))
     }
 
     @Test fun `asks for messages in the app language`() = runTest {

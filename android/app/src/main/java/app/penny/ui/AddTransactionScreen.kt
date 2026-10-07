@@ -17,12 +17,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MenuAnchorType
@@ -124,17 +127,24 @@ fun AddTransactionScreen(
                 }
             }
 
+            val accountCurrency = account?.currency ?: snapshot.defaultCurrency ?: ""
+            // Bridges that send Money's currencies can write transactions in them.
+            val currencies = snapshot.currencies?.let { (listOf(accountCurrency) + it).filter(String::isNotEmpty).distinct() }.orEmpty()
+            val currency = form.currency ?: accountCurrency
             OutlinedTextField(
                 value = form.amount,
                 onValueChange = { text -> vm.update { it.copy(amount = text.filter { c -> c.isDigit() || c == ',' || c == '.' }) } },
                 label = { Text(stringResource(R.string.field_amount)) },
-                suffix = { Text(account?.currency ?: snapshot.defaultCurrency ?: "") },
+                suffix = if (currencies.size > 1) null else { { Text(currency) } },
+                trailingIcon = if (currencies.size > 1) { { CurrencyMenu(currency, currencies, vm::setCurrency) } } else null,
                 singleLine = true,
                 textStyle = MaterialTheme.typography.headlineSmall,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
                 isError = form.amount.isNotEmpty() && form.parsedAmount == null,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            if (form.currency != null) RateField(form, accountCurrency, vm)
 
             AccountPicker(
                 // A hidden account stays listed when it's preselected (opened from its own screen).
@@ -210,6 +220,69 @@ fun AddTransactionScreen(
             ) { DatePicker(state) }
         }
     }
+}
+
+/** The amount's currency: the account's, or another one of Money's. */
+@Composable
+private fun CurrencyMenu(selected: String, currencies: List<String>, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Text(selected, style = MaterialTheme.typography.titleMedium)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = stringResource(R.string.field_currency))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            currencies.forEach { code ->
+                DropdownMenuItem(
+                    text = { Text(code) },
+                    trailingIcon = {
+                        Text(Format.currencyName(code), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    },
+                    onClick = { onSelect(code); expanded = false },
+                )
+            }
+        }
+    }
+}
+
+/** How much one unit of the chosen currency is in the account's, and what the amount comes to. */
+@Composable
+private fun RateField(form: AddForm, accountCurrency: String, vm: AddTransactionViewModel) {
+    val suggested = vm.suggestedRate(form)
+    val rate = form.parsedRate
+    val amount = form.parsedAmount
+    val fromEcb = !form.rateEdited && suggested != null
+    OutlinedTextField(
+        value = form.rate,
+        onValueChange = vm::setRate,
+        label = { Text(stringResource(R.string.field_rate)) },
+        prefix = { Text(stringResource(R.string.rate_prefix, form.currency.orEmpty())) },
+        suffix = { Text(accountCurrency) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+        isError = form.rate.isNotEmpty() && rate == null,
+        trailingIcon = if (form.rateEdited && suggested != null) {
+            {
+                IconButton(onClick = { vm.update { it.copy(rateEdited = false) } }) {
+                    Icon(Icons.Outlined.Restore, contentDescription = stringResource(R.string.rate_use_ecb))
+                }
+            }
+        } else null,
+        supportingText = {
+            val converted = if (amount != null && rate != null) Format.money(amount.multiply(rate), accountCurrency) else null
+            Text(
+                when {
+                    converted != null && fromEcb -> stringResource(R.string.rate_converted_ecb, converted)
+                    converted != null -> stringResource(R.string.rate_converted, converted)
+                    fromEcb -> stringResource(R.string.rate_ecb)
+                    form.rate.isEmpty() -> stringResource(R.string.rate_missing)
+                    else -> ""
+                }
+            )
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

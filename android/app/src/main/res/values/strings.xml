@@ -32,6 +32,7 @@
     <string name="accounts_default_folder">Accounts</string>
     <string name="accounts_closed">Closed accounts (%d)</string>
     <string name="totals_title">Total in open accounts</string>
+    <string name="totals_converted">Converted at the latest ECB rates</string>
     <string name="totals_investments_note">Investment accounts exclude the value of securities</string>
     <string name="balance">Balance</string>
     <string name="balance_cash">Cash balance</string>
@@ -44,7 +45,8 @@
     <string name="report_previous">Previous period</string>
     <string name="report_next">Next period</string>
     <string name="report_empty">No transactions downloaded yet. Pull down to fetch them from the Mac.</string>
-    <string name="report_other_currencies">Only accounts in the chosen currency are included.</string>
+    <string name="report_left_out">Accounts in %s aren\'t included: there are no exchange rates for them.</string>
+    <string name="report_converted">Other currencies are converted at the ECB rate of each day.</string>
     <string name="report_net_worth">Net worth</string>
     <string name="report_change">%s in this period</string>
     <string name="report_net_worth_chart">Net worth chart, from %1$s to %2$s</string>
@@ -56,6 +58,19 @@
     <string name="report_no_expenses">No expenses in this period</string>
     <string name="report_uncategorized">Uncategorized</string>
     <string name="report_other">Other</string>
+
+    <!-- Currencies -->
+    <string name="currencies_title">Currencies</string>
+    <string name="currencies_summary">Penny uses the currencies set up in Money on the Mac (Settings → Currency). Exchange rates are the European Central Bank\'s daily reference rates, downloaded by the phone back to your first transaction. They convert the report and the total, and fill in the rate when you add a transaction in another currency.</string>
+    <string name="currencies_main">Main currency</string>
+    <string name="currencies_no_rates">The ECB doesn\'t publish rates for this currency</string>
+    <string name="currencies_not_downloaded">Rates not downloaded yet</string>
+    <string name="currencies_updated">Rates downloaded %s</string>
+    <string name="currencies_failed">Couldn\'t download the rates. Check the internet connection.</string>
+    <string name="currencies_download">Download rates</string>
+    <string name="currencies_single">Money and all accounts use one currency, so there\'s nothing to convert.</string>
+    <string name="currencies_not_connected">Connect to the Mac to see Money\'s currencies.</string>
+    <string name="currencies_old_bridge">Update penny-bridge on the Mac to add transactions in other currencies.</string>
 
     <!-- Account -->
     <string name="account">Account</string>
@@ -105,6 +120,15 @@
     <string name="choose_account">Choose an account</string>
     <string name="no_category">No category</string>
     <string name="error_amount">Enter an amount, e.g. 12.50</string>
+    <string name="field_currency">Currency</string>
+    <string name="field_rate">Exchange rate</string>
+    <string name="rate_prefix">1 %s =\u0020</string>
+    <string name="rate_ecb">ECB reference rate for this day</string>
+    <string name="rate_converted">%s in the account\'s currency</string>
+    <string name="rate_converted_ecb">%s at the ECB rate for this day</string>
+    <string name="rate_missing">No ECB rate for this day yet. Enter the rate.</string>
+    <string name="rate_use_ecb">Use the ECB rate</string>
+    <string name="error_rate">Enter the exchange rate, e.g. 4.25</string>
     <string name="add_footer">The transaction goes to Money on the Mac the next time the phone connects, and from there to iCloud.</string>
     <string name="search">Search</string>
     <string name="categories_frequent">Most used</string>

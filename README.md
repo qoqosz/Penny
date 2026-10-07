@@ -32,6 +32,17 @@ Android (Penny) ⇄ Wi-Fi ⇄ penny-bridge (Mac) ⇄ local Money database ⇄ Mo
 - **Details:** tapping a transaction opens a sheet with everything Money knows about it: date and time, account,
   category or splits, note, number, tags, the original amount and rate for payments in another currency, and the
   location (opens in your maps app). It also lists your other transactions with the same payee, as Money does.
+- **Foreign currencies:** Penny uses the currencies set up in Money (Settings → Currency, the default one is the main
+  currency). The phone downloads the European Central Bank's daily reference rates for them straight from the ECB
+  (not through the Mac), back to the first transaction, and updates them every few hours. A day without a
+  publication (weekend, holiday) uses the last rate before it. The rates are used to:
+  - add a transaction in another currency: pick it next to the amount, and the rate for the chosen day is filled in
+    (you can type your own). Money gets the original amount, the currency and the rate, as if you'd entered it there.
+  - convert the report and the total of accounts in several currencies (see below).
+
+  Settings → Currencies shows the latest rate of each currency, when they were downloaded, and a button to download
+  them again. The ECB publishes about 30 currencies; others can be added with a rate typed by hand, and accounts in
+  them stay out of converted totals.
 
 ## Installing on the Mac
 
@@ -72,7 +83,8 @@ On first launch Penny looks for the Mac on the network (Bonjour). After choosing
 The **Report** tab sums up a calendar month or year (switch between them at the top, arrows move between periods):
 
 - **Net worth** of all accounts except hidden ones, day by day, with the change over the period. Touch or drag
-  along the chart to see the value on a given day.
+  along the chart to see the value on a given day. Chips at the top show the report in any of Money's currencies:
+  accounts and transactions in other currencies are converted at each day's ECB rate.
 - A **pie chart** of expenses or income by category (subcategories are counted in their top-level category).
 - **Income** and **expenses** per category, with each category's share. Tap a category to see its subcategories.
 
@@ -136,7 +148,7 @@ Transactions added from the phone are written to the demo database.
 - Only expenses and income with a single category are supported. Transfers between accounts, split transactions
   and editing existing transactions don't work yet.
 - The balance of investment accounts is the cash balance only, without the value of securities.
-- The report doesn't convert currencies: with accounts in several currencies it shows one currency at a time.
+- Converted amounts use the ECB's reference rates, not the rates your bank charged, so they're close but not exact.
 - Money's data format isn't documented. The bridge checks that the model matches the installed Money version and refuses
   to write if it doesn't recognize the format. After updating Money, it's worth running `penny-bridge doctor`.
 

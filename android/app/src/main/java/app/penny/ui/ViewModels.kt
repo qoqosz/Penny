@@ -101,7 +101,7 @@ data class ReportState(
     val period: ReportPeriod,
     /** Null until the snapshot and the offline copy of transactions are there. */
     val report: Report? = null,
-    /** Currencies to choose from; the report covers the accounts in one of them. */
+    /** Currencies the report can be shown in. */
     val currencies: List<String> = emptyList(),
     val canGoBack: Boolean = false,
     val canGoForward: Boolean = false,
@@ -116,8 +116,9 @@ class ReportViewModel(private val repository: Repository, hiddenAccounts: StateF
     val state: StateFlow<ReportState> = combine(
         repository.state.map { it.snapshot to it.offlineGeneration }.distinctUntilChanged(),
         hiddenAccounts,
+        repository.rates.state.map { it.rates }.distinctUntilChanged(),
         selection,
-    ) { (snapshot, offlineGeneration), hidden, (period, chosenCurrency) ->
+    ) { (snapshot, offlineGeneration), hidden, rates, (period, chosenCurrency) ->
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
         val current = ReportPeriod.current(period.type, today)
@@ -128,11 +129,11 @@ class ReportViewModel(private val repository: Repository, hiddenAccounts: StateF
             canGoBack = first != null && period.start.isAfter(first),
             canGoForward = period.start.isBefore(current.start),
         )
-        val currencies = snapshot?.let { Reports.currencies(it, hidden) }.orEmpty()
+        val currencies = snapshot?.let { Reports.currencies(it, hidden, rates) }.orEmpty()
         val currency = chosenCurrency?.takeIf { it in currencies } ?: currencies.firstOrNull()
         if (snapshot == null || currency == null || offlineGeneration == null) return@combine base
         base.copy(
-            report = Reports.build(snapshot, transactions, hidden, currency, period, today, zone),
+            report = Reports.build(snapshot, transactions, hidden, currency, rates, period, today, zone),
             currencies = currencies,
         )
     }.flowOn(Dispatchers.Default)
@@ -191,9 +192,15 @@ data class AddForm(
     val payee: String = "",
     val date: LocalDate = LocalDate.now(),
     val note: String = "",
+    /** The currency [amount] is in, when it isn't the account's. */
+    val currency: String? = null,
+    /** One unit of [currency] in the account's currency. Filled in with the ECB rate until the user types one. */
+    val rate: String = "",
+    val rateEdited: Boolean = false,
     @StringRes val error: Int? = null,
 ) {
     val parsedAmount: BigDecimal? get() = Format.parseAmount(amount)
+    val parsedRate: BigDecimal? get() = Format.parseRate(rate)
 }
 
 class AddTransactionViewModel(
@@ -204,6 +211,28 @@ class AddTransactionViewModel(
     private val _form = MutableStateFlow(AddForm(accountId = initialAccountId ?: defaultAccount()))
     val form: StateFlow<AddForm> = _form.asStateFlow()
 
+    init {
+        // Rates downloaded while the form is open fill in the rate.
+        viewModelScope.launch { repository.rates.state.collect { _form.update(::withSuggestedRate) } }
+    }
+
+    fun accountCurrency(form: AddForm): String? =
+        repository.state.value.snapshot?.accounts?.firstOrNull { it.id == form.accountId }?.currency
+
+    /** The ECB rate for the form's day, from its currency to the account's. */
+    fun suggestedRate(form: AddForm): BigDecimal? {
+        val from = form.currency ?: return null
+        val to = accountCurrency(form) ?: return null
+        return repository.rates.state.value.rates.rate(from, to, form.date)
+    }
+
+    /** Drops a currency that is the account's own, and keeps an untouched rate at the ECB's for the day. */
+    private fun withSuggestedRate(form: AddForm): AddForm {
+        if (form.currency == null || form.currency == accountCurrency(form)) return form.copy(currency = null, rate = "", rateEdited = false)
+        if (form.rateEdited) return form
+        return form.copy(rate = suggestedRate(form)?.let(Format::rateInput).orEmpty())
+    }
+
     private fun defaultAccount(): String? {
         val snapshot = repository.state.value.snapshot ?: return null
         val candidates = snapshot.accounts.filter { !it.closed && !it.isHidden(hiddenAccounts.value) }
@@ -212,7 +241,13 @@ class AddTransactionViewModel(
             ?: candidates.filter { !it.hasInvestments }.maxByOrNull { it.transactionCount }?.id
     }
 
-    fun update(block: (AddForm) -> AddForm) = _form.update { block(it).copy(error = null) }
+    fun update(block: (AddForm) -> AddForm) = _form.update { withSuggestedRate(block(it)).copy(error = null) }
+
+    fun setCurrency(currency: String) = update { it.copy(currency = currency, rateEdited = false) }
+
+    fun setRate(text: String) = update {
+        it.copy(rate = text.filter { c -> c.isDigit() || c == ',' || c == '.' }, rateEdited = true)
+    }
 
     fun setKind(kind: Kind) = update {
         val category = repository.state.value.snapshot?.categories?.firstOrNull { c -> c.id == it.categoryId }
@@ -233,9 +268,11 @@ class AddTransactionViewModel(
     fun save(onSaved: () -> Unit) {
         val form = _form.value
         val amount = form.parsedAmount
+        val rate = form.parsedRate
         val error = when {
             amount == null -> R.string.error_amount
             form.accountId == null -> R.string.choose_account
+            form.currency != null && rate == null -> R.string.error_rate
             else -> null
         }
         if (error != null) {
@@ -254,6 +291,8 @@ class AddTransactionViewModel(
             categoryId = form.categoryId,
             payeeName = form.payee.trim().ifEmpty { null },
             note = form.note.trim().ifEmpty { null },
+            currency = form.currency,
+            exchangeRate = if (form.currency != null) rate?.toPlainString() else null,
         )
         viewModelScope.launch {
             repository.add(request)

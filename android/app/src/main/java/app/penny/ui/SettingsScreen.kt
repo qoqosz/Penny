@@ -68,6 +68,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onUnpaired: () -> Unit,
     onOpenHiddenAccounts: () -> Unit,
+    onOpenCurrencies: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -141,6 +142,12 @@ fun SettingsScreen(
                     else -> pluralStringResource(R.plurals.hidden_accounts_count, hiddenCount, hiddenCount)
                 },
                 onClick = onOpenHiddenAccounts,
+            )
+            val currencies = appState.snapshot?.allCurrencies.orEmpty()
+            SettingRow(
+                title = stringResource(R.string.currencies_title),
+                subtitle = currencies.takeIf { it.isNotEmpty() }?.joinToString(" · "),
+                onClick = onOpenCurrencies,
             )
 
             HorizontalDivider(Modifier.padding(top = 8.dp))
