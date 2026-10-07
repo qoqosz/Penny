@@ -64,6 +64,7 @@ import java.math.BigDecimal
 fun HomeScreen(
     repository: Repository,
     recent: TransactionsViewModel,
+    report: ReportViewModel,
     hiddenAccounts: StateFlow<HiddenAccounts>,
     onOpenAccount: (String) -> Unit,
     onAdd: () -> Unit,
@@ -98,11 +99,13 @@ fun HomeScreen(
                 PrimaryTabRow(selectedTabIndex = tab) {
                     Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.tab_accounts)) })
                     Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.tab_recent)) })
+                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text(stringResource(R.string.tab_report)) })
                 }
             }
         },
         floatingActionButton = {
-            if (app.snapshot != null) {
+            // The report has no list to add to, and the button would cover its charts.
+            if (app.snapshot != null && tab != 2) {
                 ExtendedFloatingActionButton(
                     onClick = onAdd,
                     icon = { Icon(Icons.Filled.Add, contentDescription = null) },
@@ -118,7 +121,8 @@ fun HomeScreen(
         ) {
             when (tab) {
                 0 -> AccountsList(app.snapshot?.accounts, hidden, app.status, onOpenAccount, onOpenHiddenAccounts)
-                else -> RecentList(repository, recent)
+                1 -> RecentList(repository, recent)
+                else -> ReportList(repository, report)
             }
         }
     }

@@ -37,6 +37,26 @@
     <string name="balance_cash">Saldo gotówkowe</string>
     <string name="no_transactions">Brak transakcji</string>
 
+    <!-- Report -->
+    <string name="tab_report">Raport</string>
+    <string name="report_monthly">Miesięczny</string>
+    <string name="report_yearly">Roczny</string>
+    <string name="report_previous">Poprzedni okres</string>
+    <string name="report_next">Następny okres</string>
+    <string name="report_empty">Nie pobrano jeszcze transakcji. Przeciągnij w dół, aby pobrać je z Maca.</string>
+    <string name="report_other_currencies">Uwzględniono tylko konta w wybranej walucie.</string>
+    <string name="report_net_worth">Majątek netto</string>
+    <string name="report_change">%s w tym okresie</string>
+    <string name="report_net_worth_chart">Wykres majątku netto, od %1$s do %2$s</string>
+    <string name="report_income">Przychody</string>
+    <string name="report_expenses">Wydatki</string>
+    <string name="report_income_by_category">Przychody według kategorii</string>
+    <string name="report_expenses_by_category">Wydatki według kategorii</string>
+    <string name="report_no_income">Brak przychodów w tym okresie</string>
+    <string name="report_no_expenses">Brak wydatków w tym okresie</string>
+    <string name="report_uncategorized">Bez kategorii</string>
+    <string name="report_other">Inne</string>
+
     <!-- Account -->
     <string name="account">Konto</string>
     <string name="account_closed">Konto zamknięte</string>

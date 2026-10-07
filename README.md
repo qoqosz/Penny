@@ -67,6 +67,18 @@ adb install app/build/outputs/apk/release/app-release.apk
 On first launch Penny looks for the Mac on the network (Bonjour). After choosing the Mac, run
 `penny-bridge pair` on it and enter the 6-digit code it shows on the phone.
 
+### Report
+
+The **Report** tab sums up a calendar month or year (switch between them at the top, arrows move between periods):
+
+- **Net worth** of all accounts except hidden ones, day by day, with the change over the period. Touch or drag
+  along the chart to see the value on a given day.
+- A **pie chart** of expenses or income by category (subcategories are counted in their top-level category).
+- **Income** and **expenses** per category, with each category's share. Tap a category to see its subcategories.
+
+Transfers between accounts and Money's own categories (investments, balance adjustments) aren't counted as income or
+expenses. The report is computed on the phone from the downloaded transactions, so it works without the Mac too.
+
 ### App settings
 
 The settings screen (gear icon on the main screen) offers:
@@ -124,6 +136,7 @@ Transactions added from the phone are written to the demo database.
 - Only expenses and income with a single category are supported. Transfers between accounts, split transactions
   and editing existing transactions don't work yet.
 - The balance of investment accounts is the cash balance only, without the value of securities.
+- The report doesn't convert currencies: with accounts in several currencies it shows one currency at a time.
 - Money's data format isn't documented. The bridge checks that the model matches the installed Money version and refuses
   to write if it doesn't recognize the format. After updating Money, it's worth running `penny-bridge doctor`.
 

@@ -103,9 +103,13 @@ private fun Screens(app: PennyApplication, nav: NavHostController, startDestinat
             val vm: TransactionsViewModel = viewModel(key = "recent", factory = viewModelFactory {
                 initializer { TransactionsViewModel(repository, null) }
             })
+            val report: ReportViewModel = viewModel(factory = viewModelFactory {
+                initializer { ReportViewModel(repository, app.preferences.hidden) }
+            })
             HomeScreen(
                 repository = repository,
                 recent = vm,
+                report = report,
                 hiddenAccounts = app.preferences.hidden,
                 onOpenAccount = { nav.navigate(Routes.account(it)) },
                 onAdd = { nav.navigate(Routes.add(null)) },

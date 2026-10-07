@@ -24,6 +24,8 @@ data class AppState(
     val status: SyncStatus = SyncStatus.Idle,
     /** Bumped whenever the Mac's data changed, so open transaction lists reload. */
     val dataVersion: Int = 0,
+    /** The generation of the offline copy of transactions, once there is one (see [Repository.allTransactions]). */
+    val offlineGeneration: String? = null,
 )
 
 class Repository(
@@ -45,7 +47,10 @@ class Repository(
     init {
         scope.launch {
             val cached = cache.read(SNAPSHOT_FILE, Snapshot.serializer())
-            _state.update { it.copy(snapshot = it.snapshot ?: cached, pending = queue.all()) }
+            val offlineGeneration = offline.current()?.generation
+            _state.update {
+                it.copy(snapshot = it.snapshot ?: cached, pending = queue.all(), offlineGeneration = it.offlineGeneration ?: offlineGeneration)
+            }
             icons.load()
         }
     }
@@ -56,7 +61,7 @@ class Repository(
         cache.clear()
         offline.clear()
         icons.clear()
-        _state.update { it.copy(snapshot = null) }
+        _state.update { it.copy(snapshot = null, offlineGeneration = null) }
         refresh()
     }
 
@@ -84,6 +89,7 @@ class Repository(
             cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
             _state.update { it.copy(snapshot = snapshot, dataVersion = it.dataVersion + if (changed) 1 else 0) }
             offline.update(connection, snapshot.generation)
+            _state.update { it.copy(offlineGeneration = offline.current()?.generation) }
             // Icons can take a while the first time; the lists show them as they arrive.
             scope.launch { syncIcons(connection, snapshot) }
             if (_state.value.pending.any { it.rejectedReason == null }) scheduleSync()
@@ -152,6 +158,9 @@ class Repository(
     /** Every transaction with this payee, newest first, from the offline copy (empty until it's downloaded). */
     suspend fun payeeTransactions(payeeId: String): List<Transaction> =
         offline.current()?.items?.filter { it.payeeId == payeeId }.orEmpty()
+
+    /** Every transaction, newest first, from the offline copy (empty until it's downloaded). */
+    suspend fun allTransactions(): List<Transaction> = offline.current()?.items.orEmpty()
 
     private suspend fun pushPending(connection: Connection) {
         for (item in queue.all()) {

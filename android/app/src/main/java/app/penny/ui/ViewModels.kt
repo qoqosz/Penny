@@ -12,16 +12,23 @@ import app.penny.data.HiddenAccounts
 import app.penny.data.Kind
 import app.penny.data.NewTransactionRequest
 import app.penny.data.NotPairedException
+import app.penny.data.PeriodType
+import app.penny.data.Report
+import app.penny.data.ReportPeriod
+import app.penny.data.Reports
 import app.penny.data.Repository
 import app.penny.data.Transaction
 import app.penny.data.UnreachableException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -88,6 +95,53 @@ class TransactionsViewModel(private val repository: Repository, private val acco
             }
         }
     }
+}
+
+data class ReportState(
+    val period: ReportPeriod,
+    /** Null until the snapshot and the offline copy of transactions are there. */
+    val report: Report? = null,
+    /** Currencies to choose from; the report covers the accounts in one of them. */
+    val currencies: List<String> = emptyList(),
+    val canGoBack: Boolean = false,
+    val canGoForward: Boolean = false,
+)
+
+/** Net worth and income/expenses by category for a month or a year, from the offline copy of transactions. */
+class ReportViewModel(private val repository: Repository, hiddenAccounts: StateFlow<HiddenAccounts>) : ViewModel() {
+    private data class Selection(val period: ReportPeriod, val currency: String? = null)
+
+    private val selection = MutableStateFlow(Selection(ReportPeriod.current(PeriodType.MONTH, LocalDate.now())))
+
+    val state: StateFlow<ReportState> = combine(
+        repository.state.map { it.snapshot to it.offlineGeneration }.distinctUntilChanged(),
+        hiddenAccounts,
+        selection,
+    ) { (snapshot, offlineGeneration), hidden, (period, chosenCurrency) ->
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val current = ReportPeriod.current(period.type, today)
+        val transactions = repository.allTransactions()
+        val first = snapshot?.let { Reports.firstDate(it, transactions, hidden, zone) }
+        val base = ReportState(
+            period = period,
+            canGoBack = first != null && period.start.isAfter(first),
+            canGoForward = period.start.isBefore(current.start),
+        )
+        val currencies = snapshot?.let { Reports.currencies(it, hidden) }.orEmpty()
+        val currency = chosenCurrency?.takeIf { it in currencies } ?: currencies.firstOrNull()
+        if (snapshot == null || currency == null || offlineGeneration == null) return@combine base
+        base.copy(
+            report = Reports.build(snapshot, transactions, hidden, currency, period, today, zone),
+            currencies = currencies,
+        )
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReportState(selection.value.period))
+
+    fun setType(type: PeriodType) = selection.update { it.copy(period = it.period.withType(type, LocalDate.now())) }
+    fun previous() = selection.update { it.copy(period = it.period.previous()) }
+    fun next() = selection.update { it.copy(period = it.period.next()) }
+    fun setCurrency(currency: String) = selection.update { it.copy(currency = currency) }
 }
 
 data class SetupState(

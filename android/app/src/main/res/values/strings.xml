@@ -37,6 +37,26 @@
     <string name="balance_cash">Cash balance</string>
     <string name="no_transactions">No transactions</string>
 
+    <!-- Report -->
+    <string name="tab_report">Report</string>
+    <string name="report_monthly">Monthly</string>
+    <string name="report_yearly">Yearly</string>
+    <string name="report_previous">Previous period</string>
+    <string name="report_next">Next period</string>
+    <string name="report_empty">No transactions downloaded yet. Pull down to fetch them from the Mac.</string>
+    <string name="report_other_currencies">Only accounts in the chosen currency are included.</string>
+    <string name="report_net_worth">Net worth</string>
+    <string name="report_change">%s in this period</string>
+    <string name="report_net_worth_chart">Net worth chart, from %1$s to %2$s</string>
+    <string name="report_income">Income</string>
+    <string name="report_expenses">Expenses</string>
+    <string name="report_income_by_category">Income by category</string>
+    <string name="report_expenses_by_category">Expenses by category</string>
+    <string name="report_no_income">No income in this period</string>
+    <string name="report_no_expenses">No expenses in this period</string>
+    <string name="report_uncategorized">Uncategorized</string>
+    <string name="report_other">Other</string>
+
     <!-- Account -->
     <string name="account">Account</string>
     <string name="account_closed">Account closed</string>

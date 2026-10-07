@@ -33,6 +33,23 @@ object Format {
     fun money(amount: String, currency: String, signed: Boolean = false): String =
         money(amount.toBigDecimalOrNull() ?: BigDecimal.ZERO, currency, signed)
 
+    /** Like [money] without the fraction, for chart labels. */
+    fun wholeMoney(amount: BigDecimal, currency: String): String {
+        val format = NumberFormat.getCurrencyInstance(Locale.getDefault())
+        runCatching { format.currency = Currency.getInstance(currency) }
+        format.maximumFractionDigits = 0
+        format.minimumFractionDigits = 0
+        return format.format(amount.setScale(0, RoundingMode.HALF_EVEN))
+    }
+
+    /** [part] as a share of [whole], e.g. "23%" ("23 %" in Polish), or "<1%". */
+    fun percent(part: BigDecimal, whole: BigDecimal): String {
+        val share = if (whole.signum() == 0) 0.0 else part.toDouble() / whole.toDouble()
+        val format = NumberFormat.getPercentInstance(Locale.getDefault())
+        // A tiny share isn't nothing.
+        return if (share > 0 && share < 0.005) "<" + format.format(0.01) else format.format(share)
+    }
+
     /** An exchange rate: like [money], with up to 6 decimals. */
     fun rate(rate: BigDecimal, currency: String): String {
         val format = NumberFormat.getCurrencyInstance(Locale.getDefault())
