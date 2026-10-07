@@ -81,6 +81,16 @@ cd android
 adb install app/build/outputs/apk/release/app-release.apk
 ```
 
+Or download the APK from a [GitHub release](../../releases): publishing a release builds the app for its tag and
+attaches `penny-<tag>.apk` (`.github/workflows/release.yml`; the tag must match `versionName`, e.g. `v0.4`). For a
+release whose tag predates the workflow (v0.4), run it by hand from the Actions tab with the tag.
+
+Android only installs an update signed with the same key as the installed app, so the workflow re-signs with a keystore
+from the repository's secrets: `ANDROID_KEYSTORE_BASE64` (`base64 -i my.keystore`), `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. To keep updating an app you built yourself, use the key it was signed
+with: `~/.android/debug.keystore`, password `android`, alias `androiddebugkey`. Without the secrets the APK is signed
+with a throwaway key and has to replace a previous install (uninstall first).
+
 On first launch Penny looks for the Mac on the network (Bonjour). After choosing the Mac, run
 `penny-bridge pair` on it and enter the 6-digit code it shows on the phone.
 

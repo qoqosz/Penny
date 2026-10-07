@@ -1,0 +1,75 @@
+name: Release APK
+
+# Builds the Android app for a GitHub release and attaches the APK to it.
+on:
+  release:
+    types: [published]
+  # For a release that already exists (e.g. created before this workflow).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and upload to (e.g. v0.4)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Check the version matches the tag
+        working-directory: android
+        run: |
+          version=$(sed -nE 's/^ *versionName = "(.*)"/\1/p' app/build.gradle.kts)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::versionName is $version but the release tag is $TAG"
+            exit 1
+          fi
+
+      - name: Test and build
+        working-directory: android
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+
+      # Android installs an update only when it's signed with the same key as the installed app, so the APK is
+      # re-signed with the key from the secrets (done here rather than in Gradle, so it works for any tag). Without
+      # them it keeps the runner's throwaway debug key and can't update a previous install.
+      - name: Sign the APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          built=android/app/build/outputs/apk/release/app-release.apk
+          apk="penny-$TAG.apk"
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: the APK is signed with a throwaway debug key"
+            cp "$built" "$apk"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          export KEY_PASSWORD="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/release.keystore" --ks-pass env:KEYSTORE_PASSWORD \
+            --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD --out "$apk" "$built"
+          "$tools/apksigner" verify --print-certs "$apk"
+          rm "$RUNNER_TEMP/release.keystore"
+
+      - name: Upload the APK to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "penny-$TAG.apk" --clobber --repo "$GITHUB_REPOSITORY"
