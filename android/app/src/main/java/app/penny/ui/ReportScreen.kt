@@ -204,9 +204,15 @@ private fun NetWorthCard(report: Report) {
         }
         Spacer(Modifier.height(12.dp))
         NetWorthChart(report, selected, onSelect = { selected = it })
-        if (report.hasInvestments) {
+        val note = when {
+            report.hasInvestments -> R.string.totals_investments_note
+            report.unvalued -> R.string.report_unvalued
+            report.hasSecurities -> R.string.report_securities
+            else -> null
+        }
+        if (note != null) {
             Text(
-                stringResource(R.string.totals_investments_note),
+                stringResource(note),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp),

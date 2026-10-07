@@ -51,6 +51,13 @@ object Format {
     }
 
     /** An exchange rate: like [money], with up to 6 decimals. */
+    /** A number of shares: whole, or with up to six decimals for fractional ones. */
+    fun shares(shares: BigDecimal): String {
+        val format = NumberFormat.getNumberInstance(Locale.getDefault())
+        format.maximumFractionDigits = 6
+        return format.format(shares)
+    }
+
     fun rate(rate: BigDecimal, currency: String): String {
         val format = NumberFormat.getCurrencyInstance(Locale.getDefault())
         runCatching { format.currency = Currency.getInstance(currency) }

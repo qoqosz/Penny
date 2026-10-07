@@ -20,13 +20,62 @@ data class Account(
     val transactionCount: Int = 0,
     val lastTransactionDate: String? = null,
     val hasInvestments: Boolean = false,
+    /** Securities held now. Bridges older than investment support send none. */
+    val holdings: List<Holding> = emptyList(),
 ) {
+    /** The cash; investment accounts also hold [holdings] (see [Valuation]). */
     val balanceValue: BigDecimal get() = balance.toBigDecimalOrNull() ?: BigDecimal.ZERO
 
     /** Accounts the user hid in settings, alone or with their folder, stay out of lists, totals and the account picker. */
     fun isHidden(hidden: HiddenAccounts): Boolean =
         id in hidden.accounts || (folderId != null && folderId in hidden.folders)
 }
+
+@Serializable
+data class Holding(
+    val securityId: String,
+    /**
+     * Negative when only a sale was entered, e.g. a pension account topped up from outside, recorded as selling units
+     * so the cash goes up. Such holdings are worth nothing (the cash already counts), never a short position.
+     */
+    val shares: String,
+) {
+    val sharesValue: BigDecimal get() = shares.toBigDecimalOrNull() ?: BigDecimal.ZERO
+}
+
+/** A stock, fund or other asset traded in investment accounts (Money's `TradableAsset`). */
+@Serializable
+data class Security(
+    val id: String,
+    val name: String,
+    /** The Yahoo Finance ticker Money downloads quotes for; null when the price is entered by hand. */
+    val symbol: String? = null,
+    val exchange: String? = null,
+    val currency: String? = null,
+    /** Money's last quote, or without one the price of the last buy or sell, in [priceCurrency]. */
+    val price: String? = null,
+    val priceCurrency: String? = null,
+    val priceDate: String? = null,
+    /** The first transaction with it (ISO instant). */
+    val firstDate: String? = null,
+)
+
+/** A buy, sell, dividend or split of a security. */
+@Serializable
+data class Investment(
+    val securityId: String,
+    /** The account holding the shares (usually the transaction's own). */
+    val accountId: String,
+    /** "buy", "sell", "dividend", "split" or "other". */
+    val type: String,
+    /** Shares bought or sold, unsigned. */
+    val shares: String = "0",
+    /** Per share, in the transaction's currency. */
+    val price: String? = null,
+    /** A split turns [splitFrom] shares into [splitTo]. */
+    val splitTo: Int? = null,
+    val splitFrom: Int? = null,
+)
 
 @Serializable
 data class Category(
@@ -103,6 +152,7 @@ data class Transaction(
     val originalCurrency: String? = null,
     /** One unit of [originalCurrency] in [currency]. */
     val exchangeRate: String? = null,
+    val investment: Investment? = null,
 ) {
     val instant: Instant get() = runCatching { Instant.parse(date) }.getOrDefault(Instant.EPOCH)
     val amountValue: BigDecimal get() = amount.toBigDecimalOrNull() ?: BigDecimal.ZERO
@@ -122,10 +172,13 @@ data class Snapshot(
     val accounts: List<Account>,
     val categories: List<Category>,
     val payees: List<Payee>,
+    /** Securities in Money's investment accounts. Null from bridges that only know the accounts' cash. */
+    val securities: List<Security>? = null,
 ) {
     // Delegated properties aren't serialized.
     private val payeesById by lazy { payees.associateBy { it.id } }
     private val categoriesById by lazy { categories.associateBy { it.id } }
+    private val securitiesById by lazy { securities.orEmpty().associateBy { it.id } }
 
     /** Money's default currency, or else the one most accounts use. */
     val mainCurrency: String?
@@ -139,8 +192,13 @@ data class Snapshot(
             accounts.mapTo(this) { it.currency }
         } - ""
 
+    /** Currencies to download exchange rates for: [allCurrencies] and the ones securities are priced in. */
+    val rateCurrencies: Set<String>
+        get() = allCurrencies + securities.orEmpty().flatMap { listOfNotNull(it.currency, it.priceCurrency) } - ""
+
     fun payee(id: String?): Payee? = id?.let(payeesById::get)
     fun category(id: String?): Category? = id?.let(categoriesById::get)
+    fun security(id: String?): Security? = id?.let(securitiesById::get)
 }
 
 @Serializable

@@ -36,6 +36,24 @@
     <string name="totals_investments_note">Konta inwestycyjne liczone bez wartości papierów</string>
     <string name="balance">Saldo</string>
     <string name="balance_cash">Saldo gotówkowe</string>
+    <string name="totals_securities">Papiery wartościowe według bieżących cen rynkowych</string>
+    <string name="account_securities_cash">Papiery %1$s · gotówka %2$s</string>
+    <string name="portfolio">Portfel</string>
+    <string name="portfolio_empty">Obecnie brak papierów wartościowych</string>
+    <string name="transactions">Transakcje</string>
+    <plurals name="shares">
+        <item quantity="one">%s szt.</item>
+        <item quantity="few">%s szt.</item>
+        <item quantity="many">%s szt.</item>
+        <item quantity="other">%s szt.</item>
+    </plurals>
+    <string name="price_from_money">cena z Money</string>
+    <string name="prices_downloading">Pobieranie cen…</string>
+    <string name="prices_failed">Nie udało się pobrać części cen. Sprawdź połączenie z internetem.</string>
+    <string name="prices_updated">Ceny z Yahoo Finance, pobrane %s</string>
+    <string name="prices_missing">Brak ceny lub kursu dla %s, więc liczy się jako zero.</string>
+    <string name="report_securities">Papiery wartościowe według ceny rynkowej z każdego dnia.</string>
+    <string name="report_unvalued">Niektóre papiery nie mają ceny lub kursu i liczą się jako zero.</string>
     <string name="no_transactions">Brak transakcji</string>
 
     <!-- Report -->

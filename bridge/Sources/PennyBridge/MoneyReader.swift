@@ -17,6 +17,48 @@ struct AccountDTO: Codable {
     let lastTransactionDate: Date?
     /// Investment accounts: the balance covers cash only, not the value of held securities.
     let hasInvestments: Bool
+    /// Securities held now (from buys, sells and splits), to value at market prices on the phone.
+    let holdings: [HoldingDTO]
+}
+
+struct HoldingDTO: Codable {
+    let securityId: String
+    /// Can be negative when only a sale was entered (e.g. a pension account topped up from outside, recorded as a
+    /// sale of units so the cash goes up); the phone counts that as nothing.
+    let shares: String
+}
+
+/// A stock, fund or other asset traded in an investment account (Money's `TradableAsset`).
+struct SecurityDTO: Codable {
+    let id: String
+    let name: String
+    /// The ticker Money downloads quotes for (Yahoo Finance), or nil for assets whose price is entered by hand.
+    let symbol: String?
+    let exchange: String?
+    /// The currency it's quoted in.
+    let currency: String?
+    /// Money's last quote, or when there is none the price of the last buy or sell.
+    let price: String?
+    let priceCurrency: String?
+    let priceDate: Date?
+    /// The first transaction with it.
+    let firstDate: Date?
+}
+
+/// A buy, sell, dividend or split of a security.
+struct InvestmentDTO: Codable {
+    let securityId: String
+    /// The account holding the shares (usually the transaction's own).
+    let accountId: String
+    /// "buy", "sell", "dividend", "split" or "other".
+    let type: String
+    /// Shares bought or sold (unsigned), 0 for other types.
+    let shares: String
+    /// Price per share in the transaction's currency.
+    let price: String?
+    /// A split turns `splitFrom` shares into `splitTo`.
+    let splitTo: Int?
+    let splitFrom: Int?
 }
 
 struct CategoryDTO: Codable {
@@ -86,6 +128,7 @@ struct TransactionDTO: Codable {
     let originalAmount: String?
     let originalCurrency: String?
     let exchangeRate: String?
+    let investment: InvestmentDTO?
 }
 
 struct SnapshotDTO: Codable {
@@ -99,6 +142,8 @@ struct SnapshotDTO: Codable {
     let accounts: [AccountDTO]
     let categories: [CategoryDTO]
     let payees: [PayeeDTO]
+    /// Securities that appear in transactions.
+    let securities: [SecurityDTO]
 }
 
 struct TransactionPageDTO: Codable {
@@ -153,6 +198,7 @@ struct MoneySnapshot {
     let accounts: [AccountDTO]
     let categories: [CategoryDTO]
     let payees: [PayeeDTO]
+    let securities: [SecurityDTO]
     let iconSources: [String: IconSource]
     /// Newest first.
     let transactions: [TransactionDTO]
@@ -165,7 +211,8 @@ struct MoneySnapshot {
 
     func dto(writesEnabled: Bool) -> SnapshotDTO {
         SnapshotDTO(generation: generation, bridgeVersion: bridgeVersion, writesEnabled: writesEnabled,
-                    defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts, categories: categories, payees: payees)
+                    defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts, categories: categories, payees: payees,
+                    securities: securities)
     }
 }
 
@@ -195,7 +242,7 @@ enum MoneyReader {
         let transactionObjects = try ctx.fetchAll(
             "Transaction", NSPredicate(format: "isScheduledTransaction == nil OR isScheduledTransaction == NO"),
             subentities: false,
-            prefetch: ["account", "payee", "tags", "placemark", "transactionSplits", "transactionSplits.category", "transactionSplits.tags",
+            prefetch: ["account", "investmentAccount", "tradableAsset", "payee", "tags", "placemark", "transactionSplits", "transactionSplits.category", "transactionSplits.tags",
                        "transactionSplits.transferSplit", "transactionSplits.transferSplit.transaction"])
 
         var accountCurrency: [NSManagedObjectID: String] = [:]
@@ -260,6 +307,39 @@ enum MoneyReader {
         var splitTypeCounts: [Int: Int] = [:]
         var investmentAccounts: Set<NSManagedObjectID> = []
         var idSamples: [String] = []
+        var assets: [NSManagedObjectID: NSManagedObject] = [:]
+        var shareChanges: [NSManagedObjectID: [NSManagedObjectID: [(date: Date, change: ShareChange)]]] = [:]
+        var firstTrades: [NSManagedObjectID: Date] = [:]
+        var lastTrades: [NSManagedObjectID: (date: Date, price: Decimal, currency: String)] = [:]
+
+        func investment(_ tx: NSManagedObject, account: NSManagedObject, date: Date, currency: String) -> InvestmentDTO? {
+            guard let asset = tx.object("tradableAsset") else { return nil }
+            let holder = tx.object("investmentAccount") ?? account
+            let shares = tx.decimal("investmentShares")
+            let price = tx.decimal("investmentPrice")
+            let type = InvestmentType(rawValue: tx.int("investmentType"))
+            let change: ShareChange?
+            switch type {
+            case .buy: change = .add(shares)
+            case .sell: change = .add(-shares)
+            case .split:
+                let to = tx.int("investmentSplitRatioA"), from = tx.int("investmentSplitRatioB")
+                change = to > 0 && from > 0 ? .split(to: to, from: from) : nil
+            case .dividend, nil: change = nil
+            }
+            assets[asset.objectID] = asset
+            if let change { shareChanges[holder.objectID, default: [:]][asset.objectID, default: []].append((date, change)) }
+            if date < (firstTrades[asset.objectID] ?? .distantFuture) { firstTrades[asset.objectID] = date }
+            let trade = type == .buy || type == .sell
+            if trade, price > 0, date >= (lastTrades[asset.objectID]?.date ?? .distantPast) {
+                lastTrades[asset.objectID] = (date, price, tx.string("currencyCode").flatMap { $0.isEmpty ? nil : $0 } ?? currency)
+            }
+            let split: (to: Int, from: Int)? = if case .split(let to, let from) = change { (to, from) } else { nil }
+            return InvestmentDTO(
+                securityId: asset.publicID, accountId: holder.publicID, type: type.map { "\($0)" } ?? "other",
+                shares: (trade ? shares : 0).plainString, price: trade ? price.plainString : nil,
+                splitTo: split?.to, splitFrom: split?.from)
+        }
 
         for tx in transactionObjects {
             guard let account = tx.object("account") else { continue }
@@ -306,7 +386,8 @@ enum MoneyReader {
                 kind: kind.rawValue, reconciled: tx.int("reconciledStatus"), splits: splits,
                 tags: tags(of: tx, splits: splitObjects), location: location(of: tx),
                 originalAmount: foreign ? originalTotal.plainString : nil, originalCurrency: foreign ? txCurrency : nil,
-                exchangeRate: foreign ? tx.decimal("currencyRateToAccountCurrency").plainString : nil))
+                exchangeRate: foreign ? tx.decimal("currencyRateToAccountCurrency").plainString : nil,
+                investment: investment(tx, account: account, date: date, currency: currency)))
 
             // Plain single-split transactions are the model for the ones created from the phone.
             if kind != .transfer, splitObjects.count == 1, let split = splitObjects.first, total != 0,
@@ -330,6 +411,30 @@ enum MoneyReader {
         }
         transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
 
+        func holdings(of account: NSManagedObject) -> [HoldingDTO] {
+            (shareChanges[account.objectID] ?? [:]).compactMap { assetID, changes in
+                let shares = changes.sorted { $0.date < $1.date }.reduce(Decimal(0)) { $1.change.apply(to: $0) }
+                // Sums of fractional shares can leave dust.
+                guard abs(shares) >= Decimal(string: "0.00000001")!, let asset = assets[assetID] else { return nil }
+                return HoldingDTO(securityId: asset.publicID, shares: shares.plainString)
+            }.sorted { $0.securityId < $1.securityId }
+        }
+
+        let securities = assets.values.map { asset -> SecurityDTO in
+            func text(_ key: String) -> String? { asset.string(key).flatMap { $0.isEmpty ? nil : $0 } }
+            let quote = asset.decimal("quote")
+            let last = lastTrades[asset.objectID]
+            let quoted = quote > 0 && text("currencyCode") != nil
+            return SecurityDTO(
+                id: asset.publicID, name: text("name") ?? text("symbol") ?? "?",
+                symbol: asset.bool("canEditQuote") ? nil : text("symbol"), exchange: text("stockExchangeName"),
+                currency: text("currencyCode"),
+                price: quoted ? quote.plainString : last?.price.plainString,
+                priceCurrency: quoted ? text("currencyCode") : last?.currency,
+                priceDate: quoted ? asset.date("updateDate") : last?.date,
+                firstDate: firstTrades[asset.objectID])
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+
         let accounts = accountObjects.map { a in
             AccountDTO(
                 id: a.publicID, name: a.string("name") ?? "Konto", type: a.int("accountType"),
@@ -337,7 +442,8 @@ enum MoneyReader {
                 folderId: a.object("folder")?.publicID,
                 closed: a.bool("closed"), sortOrder: a.int("sortOrder"),
                 balance: (balances[a.objectID] ?? 0).plainString, transactionCount: counts[a.objectID] ?? 0,
-                lastTransactionDate: lastDates[a.objectID], hasInvestments: investmentAccounts.contains(a.objectID))
+                lastTransactionDate: lastDates[a.objectID], hasInvestments: investmentAccounts.contains(a.objectID),
+                holdings: holdings(of: a))
         }.sorted { ($0.closed ? 1 : 0, $0.sortOrder, $0.name) < ($1.closed ? 1 : 0, $1.sortOrder, $1.name) }
 
         // Model new transactions on the most recent plain entry using the dominant (non-investment) split type.
@@ -399,9 +505,37 @@ enum MoneyReader {
 
         return MoneySnapshot(
             generation: generation, defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts,
-            categories: categories, payees: payees, iconSources: iconSources, transactions: transactions,
+            categories: categories, payees: payees, securities: securities, iconSources: iconSources, transactions: transactions,
             templatesByCategory: templatesByCategory.mapValues(\.template),
             templatesByKind: templatesByKind, idStyle: IDStyle.detect(idSamples))
+    }
+}
+
+/// Money's `Transaction.investmentType` (Money 9 has no others).
+enum InvestmentType: Int, CustomStringConvertible {
+    case buy = 10, sell = 20, dividend = 30, split = 40
+
+    var description: String {
+        switch self {
+        case .buy: "buy"
+        case .sell: "sell"
+        case .dividend: "dividend"
+        case .split: "split"
+        }
+    }
+}
+
+/// How a transaction changes the shares held.
+enum ShareChange {
+    case add(Decimal)
+    /// `from` shares become `to` (Money's split ratio A:B is to:from).
+    case split(to: Int, from: Int)
+
+    func apply(to shares: Decimal) -> Decimal {
+        switch self {
+        case .add(let n): shares + n
+        case .split(let to, let from): shares * Decimal(to) / Decimal(from)
+        }
     }
 }
 

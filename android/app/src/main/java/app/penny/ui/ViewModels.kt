@@ -117,8 +117,9 @@ class ReportViewModel(private val repository: Repository, hiddenAccounts: StateF
         repository.state.map { it.snapshot to it.offlineGeneration }.distinctUntilChanged(),
         hiddenAccounts,
         repository.rates.state.map { it.rates }.distinctUntilChanged(),
+        repository.prices.state.map { it.prices }.distinctUntilChanged(),
         selection,
-    ) { (snapshot, offlineGeneration), hidden, rates, (period, chosenCurrency) ->
+    ) { (snapshot, offlineGeneration), hidden, rates, prices, (period, chosenCurrency) ->
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
         val current = ReportPeriod.current(period.type, today)
@@ -133,7 +134,7 @@ class ReportViewModel(private val repository: Repository, hiddenAccounts: StateF
         val currency = chosenCurrency?.takeIf { it in currencies } ?: currencies.firstOrNull()
         if (snapshot == null || currency == null || offlineGeneration == null) return@combine base
         base.copy(
-            report = Reports.build(snapshot, transactions, hidden, currency, rates, period, today, zone),
+            report = Reports.build(snapshot, transactions, hidden, currency, rates, period, today, zone, prices),
             currencies = currencies,
         )
     }.flowOn(Dispatchers.Default)

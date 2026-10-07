@@ -55,8 +55,12 @@ data class Report(
     val startValue: BigDecimal,
     val income: List<CategoryTotal>,
     val expenses: List<CategoryTotal>,
-    /** Some accounts are investment accounts, whose securities aren't counted. */
+    /** Some accounts are investment accounts whose securities aren't counted (the bridge doesn't send holdings). */
     val hasInvestments: Boolean,
+    /** Securities are included at each day's price. */
+    val hasSecurities: Boolean = false,
+    /** Some securities have no price or exchange rate on some days, so they count as nothing there. */
+    val unvalued: Boolean = false,
     /** Accounts in other currencies were converted at each day's exchange rate. */
     val converted: Boolean = false,
     /** Currencies of visible accounts that couldn't be converted (no rates), so their accounts are left out. */
@@ -93,6 +97,7 @@ object Reports {
     /**
      * Net worth and income/expenses by category for the visible accounts (closed ones too; they count for the past),
      * in [currency]. Accounts in other currencies are converted at each day's rate; without rates they're left out.
+     * Investment accounts count their securities at each day's price (see [Valuation]).
      */
     fun build(
         snapshot: Snapshot,
@@ -103,6 +108,7 @@ object Reports {
         period: ReportPeriod,
         today: LocalDate,
         zone: ZoneId,
+        prices: SecurityPriceTable = SecurityPriceTable.EMPTY,
     ): Report {
         val visible = snapshot.accounts.filterNot { it.isHidden(hidden) }
         val (accounts, leftOut) = visible.partition {
@@ -121,13 +127,32 @@ object Reports {
         val running = HashMap<String, BigDecimal>()
         accounts.forEach { running.merge(it.currency, it.balanceValue, BigDecimal::add) }
         dated.forEach { (_, tx) -> running.merge(accountCurrency.getValue(tx.accountId), tx.amountValue.negate(), BigDecimal::add) }
+
+        // Shares the same way: today's from the snapshot, back to before the first trade, then forward day by day.
+        val valuation = Valuation(snapshot, prices, rates, transactions, zone)
+        val shares = HashMap<Pair<String, String>, BigDecimal>()
+        accounts.forEach { a -> a.holdings.forEach { shares[a.id to it.securityId] = it.sharesValue } }
+        val trades = transactions.filter { it.investment?.accountId in accountCurrency }
+            .map { it.instant.atZone(zone).toLocalDate() to it.investment!! }
+            .sortedBy { it.first }
+        trades.asReversed().forEach { (_, inv) -> shares.change(inv, undo = true) }
+        var unvalued = false
+
         var i = 0
+        var j = 0
         fun valueThrough(day: LocalDate): BigDecimal {
             while (i < dated.size && !dated[i].first.isAfter(day)) {
                 val tx = dated[i++].second
                 running.merge(accountCurrency.getValue(tx.accountId), tx.amountValue, BigDecimal::add)
             }
-            return running.entries.fold(BigDecimal.ZERO) { s, (from, sum) -> s + inCurrency(sum, from, day) }
+            while (j < trades.size && !trades[j].first.isAfter(day)) shares.change(trades[j++].second, undo = false)
+            val cash = running.entries.fold(BigDecimal.ZERO) { s, (from, sum) -> s + inCurrency(sum, from, day) }
+            return shares.entries.fold(cash) { s, (key, n) ->
+                val security = snapshot.security(key.second) ?: return@fold s
+                val value = valuation.value(security, n, day, currency)
+                if (value == null) unvalued = true
+                s + (value ?: BigDecimal.ZERO)
+            }
         }
         val startValue = valueThrough(period.start.minusDays(1))
         val points = ArrayList<NetWorthPoint>()
@@ -145,7 +170,9 @@ object Reports {
         val (income, expenses) = categoryTotals(snapshot, inPeriod)
         return Report(
             period, currency, points, startValue, income, expenses,
-            hasInvestments = accounts.any { it.hasInvestments },
+            hasInvestments = snapshot.securities == null && accounts.any { it.hasInvestments },
+            hasSecurities = shares.isNotEmpty(),
+            unvalued = unvalued,
             converted = accounts.any { it.currency != currency },
             leftOut = leftOut.map { it.currency }.distinct(),
         )
@@ -205,6 +232,23 @@ object Reports {
     }
 
     private val MATH = MathContext.DECIMAL64
+
+    /** Applies a buy, sell or split to the shares held (or takes it back). */
+    private fun MutableMap<Pair<String, String>, BigDecimal>.change(inv: Investment, undo: Boolean) {
+        val key = inv.accountId to inv.securityId
+        val held = get(key) ?: BigDecimal.ZERO
+        val n = inv.shares.toBigDecimalOrNull() ?: BigDecimal.ZERO
+        val to = inv.splitTo?.takeIf { it > 0 }?.toBigDecimal()
+        val from = inv.splitFrom?.takeIf { it > 0 }?.toBigDecimal()
+        val updated = when (inv.type) {
+            "buy" -> if (undo) held - n else held + n
+            "sell" -> if (undo) held + n else held - n
+            "split" -> if (to == null || from == null) held
+                else if (undo) held.multiply(from).divide(to, MATH) else held.multiply(to).divide(from, MATH)
+            else -> return
+        }
+        put(key, updated)
+    }
 
     private fun topLevel(snapshot: Snapshot, category: Category): Category {
         var current = category

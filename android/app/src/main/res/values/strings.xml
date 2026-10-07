@@ -36,6 +36,22 @@
     <string name="totals_investments_note">Investment accounts exclude the value of securities</string>
     <string name="balance">Balance</string>
     <string name="balance_cash">Cash balance</string>
+    <string name="totals_securities">Securities at the latest market prices</string>
+    <string name="account_securities_cash">Securities %1$s · cash %2$s</string>
+    <string name="portfolio">Portfolio</string>
+    <string name="portfolio_empty">No securities held right now</string>
+    <string name="transactions">Transactions</string>
+    <plurals name="shares">
+        <item quantity="one">%s share</item>
+        <item quantity="other">%s shares</item>
+    </plurals>
+    <string name="price_from_money">Money\'s price</string>
+    <string name="prices_downloading">Downloading prices…</string>
+    <string name="prices_failed">Couldn\'t download some prices. Check the internet connection.</string>
+    <string name="prices_updated">Prices from Yahoo Finance, downloaded %s</string>
+    <string name="prices_missing">No price or exchange rate for %s, so it counts as zero.</string>
+    <string name="report_securities">Securities are valued at each day\'s market price.</string>
+    <string name="report_unvalued">Some securities have no price or exchange rate and count as zero.</string>
     <string name="no_transactions">No transactions</string>
 
     <!-- Report -->

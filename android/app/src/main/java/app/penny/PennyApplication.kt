@@ -12,7 +12,9 @@ import app.penny.data.IconStore
 import app.penny.data.JsonStore
 import app.penny.data.PendingQueue
 import app.penny.data.Repository
+import app.penny.data.SecurityPrices
 import app.penny.data.Settings
+import app.penny.data.YahooPriceSource
 import app.penny.lock.AppLock
 import app.penny.sync.SyncWorker
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +39,7 @@ class PennyApplication : Application() {
             icons = IconStore(File(filesDir, "icons")),
             // Not tied to the paired Mac, so kept when unpairing.
             rates = CurrencyRates(JsonStore(File(filesDir, "rates")), EcbRateSource()),
+            prices = SecurityPrices(JsonStore(File(filesDir, "prices")), YahooPriceSource()),
             scope = appScope,
             scheduleSync = { SyncWorker.schedule(this) },
         )

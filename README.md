@@ -43,6 +43,12 @@ Android (Penny) ⇄ Wi-Fi ⇄ penny-bridge (Mac) ⇄ local Money database ⇄ Mo
   Settings → Currencies shows the latest rate of each currency, when they were downloaded, and a button to download
   them again. The ECB publishes about 30 currencies; others can be added with a rate typed by hand, and accounts in
   them stay out of converted totals.
+- **Investments:** an investment account is worth its cash plus its securities. The bridge counts the shares held
+  from Money's buys, sells and splits, and the phone values them at market prices it downloads from Yahoo Finance
+  (the source Money itself uses for quotes, with the same tickers), converted at the ECB rate. Prices are downloaded
+  back to each security's first transaction and refreshed every half hour while the app is used. Securities without
+  a ticker (prices you enter by hand in Money) use Money's last quote, or the last buy or sell price. An investment
+  account opens on two tabs: Portfolio (shares × price and the value of each security) and Transactions.
 
 ## Installing on the Mac
 
@@ -84,7 +90,8 @@ The **Report** tab sums up a calendar month or year (switch between them at the 
 
 - **Net worth** of all accounts except hidden ones, day by day, with the change over the period. Touch or drag
   along the chart to see the value on a given day. Chips at the top show the report in any of Money's currencies:
-  accounts and transactions in other currencies are converted at each day's ECB rate.
+  accounts and transactions in other currencies are converted at each day's ECB rate. Investment accounts count
+  their securities at each day's market price.
 - A **pie chart** of expenses or income by category (subcategories are counted in their top-level category).
 - **Income** and **expenses** per category, with each category's share. Tap a category to see its subcategories.
 
@@ -147,7 +154,7 @@ Transactions added from the phone are written to the demo database.
   `deferWhileMoneyActive: false`.
 - Only expenses and income with a single category are supported. Transfers between accounts, split transactions
   and editing existing transactions don't work yet.
-- The balance of investment accounts is the cash balance only, without the value of securities.
+- Securities are valued at Yahoo Finance's prices (delayed during trading hours), not your broker's.
 - Converted amounts use the ECB's reference rates, not the rates your bank charged, so they're close but not exact.
 - Money's data format isn't documented. The bridge checks that the model matches the installed Money version and refuses
   to write if it doesn't recognize the format. After updating Money, it's worth running `penny-bridge doctor`.

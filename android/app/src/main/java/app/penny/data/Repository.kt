@@ -2,12 +2,18 @@ package app.penny.data
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
@@ -39,6 +45,8 @@ class Repository(
     val icons: IconStore,
     /** Exchange rates for Money's currencies; they come from the ECB, not from the Mac. */
     val rates: CurrencyRates,
+    /** Prices of the securities in investment accounts; they come from Yahoo Finance, not from the Mac. */
+    val prices: SecurityPrices,
     private val scope: CoroutineScope,
     /** Schedules a background sync (WorkManager) for when the network is back. */
     private val scheduleSync: () -> Unit,
@@ -47,6 +55,14 @@ class Repository(
     val state: StateFlow<AppState> = _state.asStateFlow()
     private val syncMutex = Mutex()
     private val offline = OfflineTransactions(client, cache)
+
+    /** Investment accounts' securities at the latest prices and rates. */
+    val valuation: StateFlow<Valuation?> = combine(
+        state.map { it.snapshot }.distinctUntilChanged(),
+        prices.state.map { it.prices }.distinctUntilChanged(),
+        rates.state.map { it.rates }.distinctUntilChanged(),
+    ) { snapshot, prices, rates -> snapshot?.let { Valuation(it, prices, rates) } }
+        .stateIn(scope, SharingStarted.Eagerly, null)
 
     init {
         scope.launch {
@@ -57,6 +73,7 @@ class Repository(
             }
             icons.load()
             rates.load()
+            prices.load()
         }
     }
 
@@ -106,8 +123,9 @@ class Repository(
             SyncStatus.Error(e.message.orEmpty())
         }
         _state.update { it.copy(status = status, pending = queue.all()) }
-        // Also without the Mac: the rates come from the internet.
+        // Also without the Mac: rates and prices come from the internet.
         scope.launch { updateRates() }
+        scope.launch { updatePrices() }
     }
 
     /**
@@ -116,11 +134,28 @@ class Repository(
      */
     suspend fun updateRates(force: Boolean = false) {
         val snapshot = _state.value.snapshot ?: return
-        val currencies = snapshot.allCurrencies
+        val currencies = snapshot.rateCurrencies
         if (currencies.size < 2) return
         val zone = ZoneId.systemDefault()
         val first = offline.current()?.items?.minOfOrNull { it.instant }?.atZone(zone)?.toLocalDate()
         rates.update(currencies, first ?: LocalDate.now(zone).minusYears(1), force)
+    }
+
+    /**
+     * Downloads the prices of the securities in investment accounts, each back to its first transaction. Without
+     * [force], recently downloaded ones are kept.
+     */
+    suspend fun updatePrices(force: Boolean = false) {
+        val securities = _state.value.snapshot?.securities ?: return
+        val zone = ZoneId.systemDefault()
+        val fallback = LocalDate.now(zone).minusYears(1)
+        val wanted = HashMap<String, LocalDate>()
+        for (s in securities) {
+            val symbol = s.symbol ?: continue
+            val from = s.firstDate?.let { runCatching { Instant.parse(it) }.getOrNull() }?.atZone(zone)?.toLocalDate() ?: fallback
+            wanted[symbol] = wanted[symbol]?.let { minOf(it, from) } ?: from
+        }
+        prices.update(wanted, force)
     }
 
     private suspend fun syncIcons(connection: Connection, snapshot: Snapshot) {

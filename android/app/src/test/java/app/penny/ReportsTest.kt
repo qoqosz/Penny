@@ -5,6 +5,12 @@ import app.penny.data.Category
 import app.penny.data.ExchangeRates
 import app.penny.data.RateSeries
 import app.penny.data.HiddenAccounts
+import app.penny.data.Holding
+import app.penny.data.Investment
+import app.penny.data.PriceSeries
+import app.penny.data.Security
+import app.penny.data.SecurityPriceTable
+import app.penny.data.Valuation
 import app.penny.data.PeriodType
 import app.penny.data.ReportPeriod
 import app.penny.data.Reports
@@ -145,6 +151,63 @@ class ReportsTest {
         assertEquals(listOf("EUR"), report.leftOut)
         assertFalse(report.converted)
         assertEquals(BigDecimal("5740"), report.endValue)
+    }
+
+    @Test fun `values securities at each day's price`() {
+        // 10 ABC (quoted in EUR) bought on 2 September for 800 PLN, split 2-for-1 on the 15th; 2 of a fund priced by
+        // hand in Money bought on the 20th at 40 PLN, which Money now prices at 50.
+        val investments = listOf(
+            tx("i1", "I", "2026-09-02", "-800").copy(
+                originalAmount = "-200", originalCurrency = "EUR",
+                investment = Investment("abc", "I", "buy", shares = "10", price = "20")),
+            tx("i2", "I", "2026-09-15", "0").copy(investment = Investment("abc", "I", "split", splitTo = 2, splitFrom = 1)),
+            tx("i3", "I", "2026-09-20", "-80").copy(investment = Investment("fund", "I", "buy", shares = "2", price = "40")),
+            tx("i4", "I", "2026-09-25", "5").copy(investment = Investment("abc", "I", "dividend")),
+        )
+        val withSecurities = Snapshot(
+            generation = "g", bridgeVersion = "1", writesEnabled = true, defaultCurrency = "PLN",
+            accounts = listOf(account("I", "105").copy(
+                hasInvestments = true, holdings = listOf(Holding("abc", "20"), Holding("fund", "2")))),
+            categories = categories, payees = emptyList(),
+            securities = listOf(
+                Security("abc", "ABC", symbol = "ABC", currency = "EUR", price = "10", priceCurrency = "EUR"),
+                Security("fund", "Fund", price = "50", priceCurrency = "PLN", priceDate = "2026-10-01T10:00:00Z"),
+            ),
+        )
+        val prices = SecurityPriceTable(mapOf("ABC" to PriceSeries.of("EUR", mapOf(
+            day("2026-09-01") to BigDecimal("20"), day("2026-09-14") to BigDecimal("22"), day("2026-09-15") to BigDecimal("11"),
+        ))!!))
+        val september = Reports.build(withSecurities, investments, HiddenAccounts(), "PLN", rates,
+            ReportPeriod(PeriodType.MONTH, 2026, 9), today, zone, prices)
+        fun on(date: String) = september.netWorth.first { it.date == LocalDate.parse(date) }.value
+        assertEquals(0, BigDecimal("980").compareTo(september.startValue))
+        assertEquals(0, BigDecimal("980").compareTo(on("2026-09-02")))  // 10 × 20 EUR × 4
+        assertEquals(0, BigDecimal("1180").compareTo(on("2026-09-10"))) // the euro at 5
+        assertEquals(0, BigDecimal("1280").compareTo(on("2026-09-14")))
+        assertEquals(0, BigDecimal("1280").compareTo(on("2026-09-15"))) // 20 × 11 EUR
+        assertEquals(0, BigDecimal("1280").compareTo(on("2026-09-20"))) // the fund at its buy price
+        assertEquals(0, BigDecimal("1285").compareTo(on("2026-09-30")))
+        assertTrue(september.hasSecurities)
+        assertFalse(september.hasInvestments)
+        assertFalse(september.unvalued)
+
+        val october = Reports.build(withSecurities, investments, HiddenAccounts(), "PLN", rates,
+            ReportPeriod(PeriodType.MONTH, 2026, 10), today, zone, prices)
+        assertEquals(0, BigDecimal("1305").compareTo(october.endValue)) // the fund at Money's 50
+
+        // Today in the account itself: without the trades, the fund is at Money's price.
+        val valuation = Valuation(withSecurities, prices, rates, zone = zone)
+        val account = withSecurities.accounts.single()
+        assertEquals(0, BigDecimal("1200").compareTo(valuation.securitiesValue(account, today)))
+        assertEquals(0, BigDecimal("1305").compareTo(valuation.total(account, today)))
+        assertEquals(listOf("abc", "fund"), valuation.holdings(account, today).map { it.security.id })
+        assertTrue(valuation.holdings(account, today).first().market)
+
+        // Without rates the euro security can't be valued.
+        val unconverted = Reports.build(withSecurities, investments, HiddenAccounts(), "PLN", noRates,
+            ReportPeriod(PeriodType.MONTH, 2026, 9), today, zone, prices)
+        assertTrue(unconverted.unvalued)
+        assertTrue(Valuation(withSecurities, prices, noRates, zone = zone).incomplete(account, today))
     }
 
     @Test fun `periods move by month or year`() {

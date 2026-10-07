@@ -32,17 +32,27 @@ class BridgeClientTest {
         server.enqueue(MockResponse().setBody("""
             {"generation":"1:2-3:4","bridgeVersion":"1.0.0","writesEnabled":true,"defaultCurrency":"PLN","currencies":["PLN","EUR"],
              "accounts":[{"id":"A","name":"Konto","type":2,"currency":"PLN","folder":"Archiwum","folderId":"F1","closed":false,"sortOrder":0,
-                          "balance":"83.16","transactionCount":4,"lastTransactionDate":"2026-10-02T08:30:00Z","hasInvestments":false}],
+                          "balance":"83.16","transactionCount":4,"lastTransactionDate":"2026-10-02T08:30:00Z","hasInvestments":false},
+                         {"id":"X","name":"XTB","type":5,"currency":"PLN","balance":"10","hasInvestments":true,
+                          "holdings":[{"securityId":"S1","shares":"143"}]}],
              "categories":[{"id":"C","name":"Groceries","fullName":"Food & Dining › Groceries","parentId":"P","kind":"expense","usageCount":3,"iconId":"c01"}],
              "payees":[{"id":"P1","name":"Biedronka","usageCount":2,"iconId":"p01"}],
+             "securities":[{"id":"S1","name":"XTB S.A.","symbol":"XTB.WA","exchange":"WSE","currency":"PLN","price":"136.12",
+                            "priceCurrency":"PLN","priceDate":"2026-10-06T15:03:02Z","firstDate":"2025-02-03T10:00:00Z"},
+                           {"id":"S2","name":"NN OFE","currency":"USD","price":"118.68","priceCurrency":"PLN"}],
              "futureField":42}
         """.trimIndent()))
         val snapshot = client.snapshot(connection)
-        assertEquals(BigDecimal("83.16"), snapshot.accounts.single().balanceValue)
+        assertEquals(BigDecimal("83.16"), snapshot.accounts.first().balanceValue)
         assertEquals(listOf("PLN", "EUR"), snapshot.currencies)
         assertEquals(setOf("PLN", "EUR"), snapshot.allCurrencies)
-        assertTrue(snapshot.accounts.single().isHidden(HiddenAccounts(folders = setOf("F1"))))
-        assertFalse(snapshot.accounts.single().isHidden(HiddenAccounts(folders = setOf("F2"))))
+        assertEquals(setOf("PLN", "EUR", "USD"), snapshot.rateCurrencies)
+        assertTrue(snapshot.accounts.first().isHidden(HiddenAccounts(folders = setOf("F1"))))
+        assertFalse(snapshot.accounts.first().isHidden(HiddenAccounts(folders = setOf("F2"))))
+        assertEquals(BigDecimal("143"), snapshot.accounts[1].holdings.single().sharesValue)
+        assertTrue(snapshot.accounts.first().holdings.isEmpty())
+        assertEquals("XTB.WA", snapshot.security("S1")?.symbol)
+        assertNull("prices entered by hand have no ticker", snapshot.security("S2")?.symbol)
         assertEquals("expense", snapshot.categories.single().kind)
         assertNull(snapshot.payees.single().categoryId)
         assertEquals("p01", snapshot.payee("P1")?.iconId)
@@ -60,7 +70,8 @@ class BridgeClientTest {
                "kind":"expense","reconciled":0,"splits":[{"id":"S1","amount":"-449.85","category":"Food"}],
                "tags":[{"name":"Vacation","color":"blue"},{"name":"Home"}],
                "location":{"street":"Puławska 2","city":"Warszawa","latitude":52.2,"longitude":21.02},
-               "originalAmount":"-101","originalCurrency":"EUR","exchangeRate":"4.4540"},
+               "originalAmount":"-101","originalCurrency":"EUR","exchangeRate":"4.4540",
+               "investment":{"securityId":"S1","accountId":"X","type":"split","shares":"0","splitTo":10,"splitFrom":1}},
               {"id":"T2","accountId":"A","date":"2026-10-01T08:30:00Z","amount":"5","currency":"PLN","kind":"income","reconciled":0,"splits":[]}
             ]}
         """.trimIndent()))
@@ -68,6 +79,8 @@ class BridgeClientTest {
         assertEquals(listOf("blue", null), full.tags.map { it.color })
         assertTrue(full.location!!.hasCoordinates)
         assertEquals("EUR", full.originalCurrency)
+        assertEquals(10, full.investment?.splitTo)
+        assertNull(old.investment)
         assertTrue("bridges before tags send none", old.tags.isEmpty())
         assertNull(old.location)
         assertNull(old.originalAmount)

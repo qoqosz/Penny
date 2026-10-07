@@ -68,12 +68,27 @@ enum SelfTest {
         print("Reading")
         let snap = try call("GET", "\(base)/snapshot", token: token)
         let accounts = snap.json["accounts"] as? [[String: Any]] ?? []
-        check(accounts.count == 1, "1 account")
+        check(accounts.count == 2, "2 accounts")
         check(snap.json["currencies"] as? [String] == ["PLN", "EUR"], "Money's currencies, the default first (\((snap.json["currencies"] as? [String])?.joined(separator: ", ") ?? "-"))")
         check(accounts.first?["folder"] as? String == "Archiwum" && accounts.first?["folderId"] is String,
               "account folder with an identifier")
         check(accounts.first?["balance"] as? String == "90", "balance 100 - 10 = 90 (got \(accounts.first?["balance"] ?? "-"))")
         let categories = snap.json["categories"] as? [[String: Any]] ?? []
+
+        let broker = accounts.first { $0["name"] as? String == "Maklerskie" }
+        let securities = snap.json["securities"] as? [[String: Any]] ?? []
+        func security(_ name: String) -> [String: Any]? { securities.first { $0["name"] as? String == name } }
+        let holdings = (broker?["holdings"] as? [[String: Any]] ?? []).map { h in
+            "\(securities.first { $0["id"] as? String == h["securityId"] as? String }?["name"] ?? "?")=\(h["shares"] ?? "?")"
+        }.sorted()
+        check(holdings == ["Fundusz=2", "XTB S.A.=25"], "holdings after a buy, a split and a sale (\(holdings))")
+        check(broker?["balance"] as? String == "-370" && broker?["hasInvestments"] as? Bool == true,
+              "brokerage cash -640 + 350 - 80 = -370 (got \(broker?["balance"] ?? "-"))")
+        check((accounts.first?["holdings"] as? [Any])?.isEmpty == true, "no holdings in a plain account")
+        check(security("XTB S.A.")?["symbol"] as? String == "XTB.WA" && security("XTB S.A.")?["price"] as? String == "136.12"
+              && security("XTB S.A.")?["priceCurrency"] as? String == "PLN", "security with Money's quote")
+        check(security("Fundusz")?["symbol"] == nil && security("Fundusz")?["price"] as? String == "40",
+              "a price entered by hand: no ticker, the last buy price")
         let food = categories.first { $0["id"] as? String == ids.food }
         check(food?["kind"] as? String == "expense", "category Jedzenie recognized as expense")
         check(categories.first { $0["id"] as? String == ids.salary }?["kind"] as? String == "income", "Pensja as income")
@@ -104,6 +119,12 @@ enum SelfTest {
         let seededPage = try call("GET", "\(base)/transactions?accountId=\(ids.account)", token: token)
         let seededItems = seededPage.json["items"] as? [[String: Any]] ?? []
         check(seededItems.contains { $0["payeeId"] as? String == ids.lidl }, "transaction links its payee")
+        let all = try call("GET", "\(base)/transactions?limit=100", token: token).json["items"] as? [[String: Any]] ?? []
+        let split = all.compactMap { $0["investment"] as? [String: Any] }.first { $0["type"] as? String == "split" }
+        check(split?["splitTo"] as? Int == 3 && split?["splitFrom"] as? Int == 1 && split?["accountId"] is String,
+              "a split with its ratio")
+        check(all.compactMap { ($0["investment"] as? [String: Any])?["type"] as? String }.sorted()
+              == ["buy", "buy", "dividend", "sell", "split"], "investment types")
         let shopping = seededItems.first { $0["payeeId"] as? String == ids.lidl }
         let tags = (shopping?["tags"] as? [[String: Any]] ?? []).map { "\($0["name"] ?? "-")/\($0["color"] ?? "none")" }
         check(tags == ["Dom/none", "Zakupy/red"], "tags with their colors (\(tags))")
@@ -188,7 +209,7 @@ enum SelfTest {
         check(rows.first?["sched"] as? Int64 == 0, "isScheduledTransaction flag copied")
         check(rows.first?["payee"] != nil && rows.first?["fok"] != nil, "payee relationship and ordered split")
         let maxPK = try db.query("SELECT Z_MAX m FROM Z_PRIMARYKEY WHERE Z_NAME = 'Transaction'").first?["m"] as? Int64
-        check(maxPK == 5, "Z_PRIMARYKEY updated")
+        check(maxPK == 10, "Z_PRIMARYKEY updated (\(maxPK ?? -1))")
         let euroRow = try db.query("""
             SELECT t.ZCURRENCYCODE code, t.ZCURRENCYRATETOACCOUNTCURRENCY rate, s.ZAMOUNT amount, s.ZAMOUNTINACCOUNTCURRENCY acc
             FROM ZTRANSACTION t JOIN ZTRANSACTIONSPLIT s ON s.ZTRANSACTION = t.Z_PK WHERE t.ZUNIQUEIDENTIFIER = ?
@@ -266,6 +287,34 @@ enum SelfTest {
                     "amountInAccountCurrency": NSDecimalNumber(string: amount), "category": category, "type": 7,
                 ])
             }
+
+            // A brokerage account: 10 XTB.WA bought, split 3-for-1, 5 sold, so 25 held; and 2 of a fund priced by
+            // hand, which has no ticker and no quote in Money (only its buy price).
+            let broker = make("Account", ["name": "Maklerskie", "currency": pln, "sortOrder": 1, "accountType": 5])
+            let xtb = make("TradableAsset", ["symbol": "XTB.WA", "name": "XTB S.A.", "currencyCode": "PLN",
+                                             "quote": NSDecimalNumber(string: "136.12"), "updateDate": Date(), "canEditQuote": false])
+            let fund = make("TradableAsset", ["symbol": "FUNDUSZ", "name": "Fundusz", "quote": 0, "canEditQuote": true])
+            let trades: [(TimeInterval, NSManagedObject, Int, String, String, Int, Int)] = [
+                (-5, xtb, 10, "10", "64", 0, 0), (-4, xtb, 40, "0", "0", 3, 1), (-3, xtb, 20, "5", "70", 0, 0),
+                (-2, fund, 10, "2", "40", 0, 0), (-1, xtb, 30, "0", "0", 0, 0),
+            ]
+            for (days, asset, type, shares, price, to, from) in trades {
+                let cash = Decimal(string: shares)! * Decimal(string: price)! * (type == 10 ? -1 : 1)
+                let tx = make("Transaction", [
+                    "account": broker, "investmentAccount": broker, "tradableAsset": asset,
+                    "date": Date(timeIntervalSinceNow: days * 86400), "transactionType": type == 10 ? 20 : 10,
+                    "investmentType": type, "investmentShares": NSDecimalNumber(string: shares),
+                    "investmentPrice": NSDecimalNumber(string: price), "investmentSplitRatioA": to, "investmentSplitRatioB": from,
+                    "isScheduledTransaction": false, "readonly": false, "currencyCode": "PLN",
+                    "currencyRateToAccountCurrency": NSDecimalNumber(string: "1"),
+                ])
+                if cash != 0 {
+                    _ = make("TransactionSplit", [
+                        "transaction": tx, "amount": cash as NSDecimalNumber, "amountInAccountCurrency": cash as NSDecimalNumber, "type": 50,
+                    ])
+                }
+            }
+
             try ctx.save()
             return Seeded(account: account.publicID, food: food.publicID, salary: salary.publicID, lidl: lidl.publicID)
         }

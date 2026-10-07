@@ -56,6 +56,7 @@ import app.penny.data.ExchangeRates
 import app.penny.data.HiddenAccounts
 import app.penny.data.Repository
 import app.penny.data.SyncStatus
+import app.penny.data.Valuation
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
@@ -77,6 +78,7 @@ fun HomeScreen(
     val app by repository.state.collectAsStateWithLifecycle()
     val hidden by hiddenAccounts.collectAsStateWithLifecycle()
     val rates by repository.rates.state.collectAsStateWithLifecycle()
+    val valuation by repository.valuation.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(0) }
     val syncing = app.status == SyncStatus.Syncing
@@ -125,7 +127,7 @@ fun HomeScreen(
         ) {
             when (tab) {
                 0 -> AccountsList(
-                    app.snapshot?.accounts, app.snapshot?.mainCurrency, rates.rates, hidden, app.status,
+                    app.snapshot?.accounts, app.snapshot?.mainCurrency, rates.rates, valuation, hidden, app.status,
                     onOpenAccount, onOpenHiddenAccounts,
                 )
                 1 -> RecentList(repository, recent)
@@ -140,6 +142,7 @@ private fun AccountsList(
     allAccounts: List<Account>?,
     mainCurrency: String?,
     rates: ExchangeRates,
+    valuation: Valuation?,
     hidden: HiddenAccounts,
     status: SyncStatus,
     onOpen: (String) -> Unit,
@@ -154,17 +157,25 @@ private fun AccountsList(
         }
         return
     }
+    // Investment accounts are worth their cash plus their securities at the latest prices.
+    val securities = remember(accounts, valuation) {
+        accounts.mapNotNull { a -> valuation?.securitiesValue(a)?.let { a.id to it } }.toMap()
+    }
+    fun value(a: Account) = a.balanceValue + (securities[a.id] ?: BigDecimal.ZERO)
     val open = accounts.filter { !it.closed }
     val closed = accounts.filter { it.closed }
     val defaultFolder = stringResource(R.string.accounts_default_folder)
     val closedTitle = stringResource(R.string.accounts_closed, closed.size)
     val hiddenCount = allAccounts.orEmpty().size - accounts.size
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-        item(key = "totals") { TotalsCard(open, mainCurrency, rates) }
+        item(key = "totals") {
+            TotalsCard(open, ::value, mainCurrency, rates, securitiesExcluded = valuation?.knowsHoldings != true,
+                hasSecurities = open.any { it.id in securities })
+        }
         open.groupBy { it.folder ?: defaultFolder }.forEach { (folder, list) ->
-            val sums = list.groupBy { it.currency }.map { (cur, a) -> Format.money(a.sumOf { it.balanceValue }, cur) }
+            val sums = list.groupBy { it.currency }.map { (cur, a) -> Format.money(a.sumOf(::value), cur) }
             item(key = "f-$folder") { SectionHeader(folder, sums.joinToString(" · ")) }
-            items(list, key = { it.id }) { AccountRow(it, onOpen) }
+            items(list, key = { it.id }) { AccountRow(it, securities[it.id], valuation?.knowsHoldings == true, onOpen) }
         }
         if (closed.isNotEmpty()) {
             item(key = "closed") {
@@ -177,7 +188,7 @@ private fun AccountsList(
                     },
                 )
             }
-            if (showClosed) items(closed, key = { it.id }) { AccountRow(it, onOpen) }
+            if (showClosed) items(closed, key = { it.id }) { AccountRow(it, securities[it.id], valuation?.knowsHoldings == true, onOpen) }
         }
         if (hiddenCount > 0) {
             item(key = "hidden") {
@@ -190,9 +201,17 @@ private fun AccountsList(
 }
 
 @Composable
-private fun TotalsCard(accounts: List<Account>, mainCurrency: String?, rates: ExchangeRates) {
+private fun TotalsCard(
+    accounts: List<Account>,
+    value: (Account) -> BigDecimal,
+    mainCurrency: String?,
+    rates: ExchangeRates,
+    /** The bridge doesn't send holdings, so investment accounts count their cash only. */
+    securitiesExcluded: Boolean,
+    hasSecurities: Boolean,
+) {
     val totals = accounts.groupBy { it.currency }
-        .mapValues { (_, list) -> list.fold(BigDecimal.ZERO) { acc, a -> acc + a.balanceValue } }
+        .mapValues { (_, list) -> list.fold(BigDecimal.ZERO) { acc, a -> acc + value(a) } }
         .toList().sortedByDescending { it.second.abs() }
     // With several currencies and rates for all of them, one total in the main currency at today's rates.
     val today = LocalDate.now()
@@ -223,7 +242,14 @@ private fun TotalsCard(accounts: List<Account>, mainCurrency: String?, rates: Ex
                     Text(Format.money(total, currency), style = MaterialTheme.typography.headlineSmall)
                 }
             }
-            if (accounts.any { it.hasInvestments }) {
+            if (hasSecurities) {
+                Text(
+                    stringResource(R.string.totals_securities),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                )
+            }
+            if (securitiesExcluded && accounts.any { it.hasInvestments }) {
                 Text(
                     stringResource(R.string.totals_investments_note),
                     style = MaterialTheme.typography.bodySmall,
@@ -235,7 +261,14 @@ private fun TotalsCard(accounts: List<Account>, mainCurrency: String?, rates: Ex
 }
 
 @Composable
-private fun AccountRow(account: Account, onOpen: (String) -> Unit) {
+private fun AccountRow(
+    account: Account,
+    /** The account's securities at the latest prices, or null when it holds none. */
+    securities: BigDecimal?,
+    knowsHoldings: Boolean,
+    onOpen: (String) -> Unit,
+) {
+    val value = account.balanceValue + (securities ?: BigDecimal.ZERO)
     ListRow(
         modifier = Modifier.clickable { onOpen(account.id) },
         leading = {
@@ -245,13 +278,17 @@ private fun AccountRow(account: Account, onOpen: (String) -> Unit) {
             )
         },
         title = account.name,
-        subtitle = if (account.hasInvestments) stringResource(R.string.balance_cash)
-        else pluralStringResource(R.plurals.transaction_count, account.transactionCount, account.transactionCount),
+        subtitle = when {
+            securities != null -> stringResource(R.string.account_securities_cash,
+                Format.money(securities, account.currency), Format.money(account.balanceValue, account.currency))
+            account.hasInvestments && !knowsHoldings -> stringResource(R.string.balance_cash)
+            else -> pluralStringResource(R.plurals.transaction_count, account.transactionCount, account.transactionCount)
+        },
         trailing = {
             Text(
-                Format.money(account.balanceValue, account.currency),
+                Format.money(value, account.currency),
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (account.balanceValue.signum() < 0) MaterialTheme.colorScheme.error
+                color = if (value.signum() < 0) MaterialTheme.colorScheme.error
                 else MaterialTheme.colorScheme.onSurface,
             )
         },
