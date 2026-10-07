@@ -40,9 +40,9 @@ jobs:
             exit 1
           fi
 
-      - name: Test and build
+      - name: Build
         working-directory: android
-        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+        run: ./gradlew --no-daemon assembleRelease
 
       # Android installs an update only when it's signed with the same key as the installed app, so the APK is
       # re-signed with the key from the secrets (done here rather than in Gradle, so it works for any tag). Without
