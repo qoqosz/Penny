@@ -5,8 +5,10 @@ import app.penny.data.SecurityPrices
 import app.penny.data.YahooPriceSource
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -98,9 +100,14 @@ class SecurityPricesTest {
         assertEquals(1, server.requestCount)
 
         // Later: the last week again, merged with what was there; a failure keeps the older prices.
+        // The tickers download in parallel, so answer by ticker rather than in order.
         clock = 2 * 60 * 60 * 1000L
-        server.enqueue(chart("USD", listOf("2026-10-07" to 13.0)))
-        server.enqueue(MockResponse().setResponseCode(429))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = when (request.requestUrl!!.pathSegments.last()) {
+                "AAA" -> chart("USD", listOf("2026-10-07" to 13.0))
+                else -> MockResponse().setResponseCode(429)
+            }
+        }
         prices.update(mapOf("AAA" to LocalDate.parse("2026-09-01"), "BBB" to LocalDate.parse("2026-10-01")))
         val paths = listOf(server.takeRequest(), server.takeRequest()).associate {
             it.requestUrl!!.pathSegments.last() to it.requestUrl!!.queryParameter("period1")
