@@ -49,6 +49,7 @@ import app.penny.data.AppLanguage
 import app.penny.data.AppPreferences
 import app.penny.data.Repository
 import app.penny.data.Settings
+import app.penny.data.SyncMode
 import app.penny.data.ThemeMode
 import app.penny.lock.AppLock
 import app.penny.lock.Biometrics
@@ -56,7 +57,7 @@ import kotlinx.coroutines.launch
 
 private enum class PinFlow { ENABLE, DISABLE, CHANGE_VERIFY, CHANGE_NEW }
 
-private enum class Picker { THEME, LANGUAGE, TIMEOUT }
+private enum class Picker { THEME, LANGUAGE, TIMEOUT, SYNC }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,6 +74,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val theme by preferences.theme.collectAsStateWithLifecycle()
+    val syncMode by preferences.syncMode.collectAsStateWithLifecycle()
     val hidden by preferences.hidden.collectAsStateWithLifecycle()
     val appState by repository.state.collectAsStateWithLifecycle()
     val lockConfig by lock.config.collectAsStateWithLifecycle()
@@ -221,6 +223,11 @@ fun SettingsScreen(
                 title = paired?.name ?: stringResource(R.string.mac_not_paired),
                 subtitle = paired?.let { "${it.host}:${it.port}" },
             )
+            SettingRow(
+                title = stringResource(R.string.sync_mode),
+                subtitle = syncModeLabel(syncMode),
+                onClick = { picker = Picker.SYNC },
+            )
             if (paired != null) {
                 SettingRow(
                     title = stringResource(R.string.unpair),
@@ -255,6 +262,13 @@ fun SettingsScreen(
             options = AppLock.TIMEOUTS.map { it to timeoutLabel(it) },
             selected = lockConfig.timeoutMillis,
             onSelect = { lock.setTimeout(it); picker = null },
+            onDismiss = { picker = null },
+        )
+        Picker.SYNC -> ChoiceDialog(
+            title = stringResource(R.string.sync_mode),
+            options = SyncMode.entries.map { it to syncModeLabel(it) },
+            selected = syncMode,
+            onSelect = { preferences.setSyncMode(it); picker = null },
             onDismiss = { picker = null },
         )
         null -> {}
@@ -365,6 +379,14 @@ private fun languageLabel(language: AppLanguage) = stringResource(
         AppLanguage.SYSTEM -> R.string.language_system
         AppLanguage.ENGLISH -> R.string.language_english
         AppLanguage.POLISH -> R.string.language_polish
+    }
+)
+
+@Composable
+private fun syncModeLabel(mode: SyncMode) = stringResource(
+    when (mode) {
+        SyncMode.AUTOMATIC -> R.string.sync_mode_automatic
+        SyncMode.MANUAL -> R.string.sync_mode_manual
     }
 )
 

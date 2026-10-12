@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +53,8 @@ class Repository(
     private val scope: CoroutineScope,
     /** Schedules a background sync (WorkManager) for when the network is back. */
     private val scheduleSync: () -> Unit,
+    /** In [SyncMode.MANUAL], queued transactions wait for [syncNow]. */
+    val syncMode: StateFlow<SyncMode>,
 ) {
     private val _state = MutableStateFlow(AppState())
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -76,6 +79,12 @@ class Repository(
             icons.load()
             rates.load()
             prices.load()
+        }
+        // Back to automatic sync: send what manual mode kept waiting.
+        scope.launch {
+            syncMode.drop(1).collect { mode ->
+                if (mode == SyncMode.AUTOMATIC && _state.value.pending.any { it.rejectedReason == null }) refresh()
+            }
         }
     }
 
@@ -102,12 +111,17 @@ class Repository(
         _state.update { AppState(pending = it.pending) }
     }
 
-    /** Sends queued transactions, then reloads accounts and categories and the offline copy of transactions. */
-    suspend fun refresh() = syncMutex.withLock {
+    private val autoSync get() = syncMode.value == SyncMode.AUTOMATIC
+
+    /**
+     * Sends queued transactions (when [push]; by default only in automatic mode), then reloads accounts and categories
+     * and the offline copy of transactions.
+     */
+    suspend fun refresh(push: Boolean = autoSync) = syncMutex.withLock {
         val bridge = settings.current() ?: return@withLock
         _state.update { it.copy(status = SyncStatus.Syncing) }
         val status = try {
-            val connection = withReconnect(bridge) { c -> pushPending(c); c }
+            val connection = withReconnect(bridge) { c -> if (push) pushPending(c); c }
             val snapshot = client.snapshot(connection)
             val changed = snapshot.generation != _state.value.snapshot?.generation
             cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
@@ -116,10 +130,10 @@ class Repository(
             _state.update { it.copy(offlineGeneration = offline.current()?.generation) }
             // Icons can take a while the first time; the lists show them as they arrive.
             scope.launch { syncIcons(connection, snapshot) }
-            if (_state.value.pending.any { it.rejectedReason == null }) scheduleSync()
+            if (autoSync && _state.value.pending.any { it.rejectedReason == null }) scheduleSync()
             SyncStatus.Idle
         } catch (e: UnreachableException) {
-            if (_state.value.pending.isNotEmpty()) scheduleSync()
+            if (autoSync && _state.value.pending.isNotEmpty()) scheduleSync()
             SyncStatus.Offline(hasCachedData = _state.value.snapshot != null)
         } catch (e: BridgeException) {
             SyncStatus.Error(e.message.orEmpty())
@@ -170,8 +184,13 @@ class Repository(
         }
     }
 
+    /** Sends queued transactions now, whatever the sync mode, then reloads. */
+    suspend fun syncNow() = refresh(push = true)
+
     /** Background sync entry point. Returns true when nothing is left to retry. */
     suspend fun syncInBackground(): Boolean {
+        // Switched to manual sync since this was scheduled: the queue waits for the user.
+        if (!autoSync) return true
         refresh()
         return _state.value.pending.none { it.rejectedReason == null }
     }
@@ -179,7 +198,7 @@ class Repository(
     suspend fun add(request: NewTransactionRequest) {
         val pending = queue.update { it + PendingTransaction(request, System.currentTimeMillis()) }
         _state.update { it.copy(pending = pending) }
-        scope.launch { refresh() }
+        if (autoSync) scope.launch { refresh() }
     }
 
     fun newClientId(): String = UUID.randomUUID().toString()
@@ -194,7 +213,8 @@ class Repository(
             list.map { if (it.request.clientId == clientId) it.copy(rejectedReason = null, lastError = null) else it }
         }
         _state.update { it.copy(pending = pending) }
-        scope.launch { refresh() }
+        // "Send again" is an explicit request, so it sends in manual mode too.
+        scope.launch { syncNow() }
     }
 
     /**

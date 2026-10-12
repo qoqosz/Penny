@@ -42,6 +42,7 @@ class PennyApplication : Application() {
             prices = SecurityPrices(JsonStore(File(filesDir, "prices")), YahooPriceSource()),
             scope = appScope,
             scheduleSync = { SyncWorker.schedule(this) },
+            syncMode = preferences.syncMode,
         )
     }
 

@@ -18,6 +18,9 @@ enum class AppLanguage(val tag: String) {
     SYSTEM(""), ENGLISH("en-US"), POLISH("pl");
 }
 
+/** When queued transactions go to the Mac: right after adding them, or only when the user taps "Sync now". */
+enum class SyncMode { AUTOMATIC, MANUAL }
+
 /** What the user hid in settings: whole Money folders and single accounts, by ID. */
 data class HiddenAccounts(val folders: Set<String> = emptySet(), val accounts: Set<String> = emptySet())
 
@@ -30,6 +33,16 @@ class AppPreferences(private val prefs: SharedPreferences) {
         runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME, null)!!) }.getOrDefault(ThemeMode.SYSTEM)
     )
     val theme: StateFlow<ThemeMode> = _theme.asStateFlow()
+
+    private val _syncMode = MutableStateFlow(
+        runCatching { SyncMode.valueOf(prefs.getString(KEY_SYNC_MODE, null)!!) }.getOrDefault(SyncMode.AUTOMATIC)
+    )
+    val syncMode: StateFlow<SyncMode> = _syncMode.asStateFlow()
+
+    fun setSyncMode(mode: SyncMode) {
+        prefs.edit { putString(KEY_SYNC_MODE, mode.name) }
+        _syncMode.value = mode
+    }
 
     private val _hidden = MutableStateFlow(
         HiddenAccounts(
@@ -77,6 +90,7 @@ class AppPreferences(private val prefs: SharedPreferences) {
 
     private companion object {
         const val KEY_THEME = "theme"
+        const val KEY_SYNC_MODE = "sync_mode"
         const val KEY_HIDDEN_FOLDERS = "hidden_folders"
         const val KEY_HIDDEN_ACCOUNTS = "hidden_accounts"
     }

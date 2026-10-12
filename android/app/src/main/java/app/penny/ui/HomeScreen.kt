@@ -4,10 +4,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -19,6 +22,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,13 +60,14 @@ import app.penny.data.Account
 import app.penny.data.ExchangeRates
 import app.penny.data.HiddenAccounts
 import app.penny.data.Repository
+import app.penny.data.SyncMode
 import app.penny.data.SyncStatus
 import app.penny.data.Valuation
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import java.math.MathContext
 import java.time.LocalDate
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +85,7 @@ fun HomeScreen(
     val hidden by hiddenAccounts.collectAsStateWithLifecycle()
     val rates by repository.rates.state.collectAsStateWithLifecycle()
     val valuation by repository.valuation.collectAsStateWithLifecycle()
+    val syncMode by repository.syncMode.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(0) }
     val syncing = app.status == SyncStatus.Syncing
@@ -115,6 +122,13 @@ fun HomeScreen(
                     },
                 )
                 StatusBanner(app.status)
+                if (syncMode == SyncMode.MANUAL) {
+                    PendingSyncBanner(
+                        count = app.pending.count { it.rejectedReason == null },
+                        syncing = syncing,
+                        onSync = { scope.launch { repository.syncNow() } },
+                    )
+                }
                 PrimaryTabRow(selectedTabIndex = tab) {
                     Tab(selected = tab == 0, onClick = { selectTab(0) }, text = { Text(stringResource(R.string.tab_accounts)) })
                     Tab(selected = tab == 1, onClick = { selectTab(1) }, text = { Text(stringResource(R.string.tab_recent)) })
@@ -146,6 +160,24 @@ fun HomeScreen(
                 1 -> RecentList(repository, recent)
                 else -> ReportList(repository, report)
             }
+        }
+    }
+}
+
+/** In manual sync mode: how many added transactions still wait for the Mac, and a button to send them. */
+@Composable
+private fun PendingSyncBanner(count: Int, syncing: Boolean, onSync: () -> Unit) {
+    if (count == 0) return
+    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Schedule, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(
+                pluralStringResource(R.plurals.pending_sync_count, count, count),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onSync, enabled = !syncing) { Text(stringResource(R.string.action_sync_now)) }
         }
     }
 }

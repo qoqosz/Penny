@@ -120,6 +120,14 @@
     <string name="pending_rejected_title">Transakcja odrzucona</string>
     <string name="pending_explainer">Transakcja zostanie wysłana do Money, gdy telefon połączy się z Makiem.</string>
     <string name="pending_retry">Wyślij ponownie</string>
+    <string name="pending_explainer_manual">Transakcja zostanie wysłana do Money po naciśnięciu „Synchronizuj teraz” na ekranie głównym.</string>
+    <plurals name="pending_sync_count">
+        <item quantity="one">%d transakcja czeka na synchronizację</item>
+        <item quantity="few">%d transakcje czekają na synchronizację</item>
+        <item quantity="many">%d transakcji czeka na synchronizację</item>
+        <item quantity="other">%d transakcji czeka na synchronizację</item>
+    </plurals>
+    <string name="action_sync_now">Synchronizuj teraz</string>
 
     <!-- Transaction details -->
     <string name="details_date">Data</string>
@@ -237,6 +245,9 @@
     <string name="set_pin">Ustaw PIN</string>
     <string name="settings_mac">Mac</string>
     <string name="mac_not_paired">Nie połączono</string>
+    <string name="sync_mode">Wysyłanie transakcji</string>
+    <string name="sync_mode_automatic">Automatycznie, zaraz po dodaniu</string>
+    <string name="sync_mode_manual">Ręcznie, przyciskiem „Synchronizuj teraz” na ekranie głównym</string>
     <string name="unpair">Rozłącz z Makiem</string>
     <string name="unpair_title">Rozłączyć z Makiem?</string>
     <string name="unpair_text">Telefon zapomni token dostępu i dane z pamięci. Oczekujące transakcje zostaną zachowane.</string>

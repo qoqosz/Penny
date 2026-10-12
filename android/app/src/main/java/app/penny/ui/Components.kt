@@ -37,6 +37,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,6 +63,7 @@ import app.penny.R
 import app.penny.data.PendingTransaction
 import app.penny.data.Repository
 import app.penny.data.Snapshot
+import app.penny.data.SyncMode
 import app.penny.data.SyncStatus
 import app.penny.data.Transaction
 import app.penny.data.TransactionSearch
@@ -156,6 +158,7 @@ fun TransactionRow(
 fun PendingRow(item: PendingTransaction, snapshot: Snapshot?, repository: Repository, accountId: String? = null) {
     val scope = rememberCoroutineScope()
     var showDialog by remember { mutableStateOf(false) }
+    val syncMode by repository.syncMode.collectAsStateWithLifecycle()
     val r = item.request
     val account = snapshot?.accounts?.firstOrNull { it.id == (accountId ?: r.accountId) }
     val signed = r.signedAmount(accountId)
@@ -188,7 +191,10 @@ fun PendingRow(item: PendingTransaction, snapshot: Snapshot?, repository: Reposi
             title = {
                 Text(stringResource(if (rejected) R.string.pending_rejected_title else R.string.pending_waiting_to_send))
             },
-            text = { Text(item.rejectedReason ?: item.lastError ?: stringResource(R.string.pending_explainer)) },
+            text = {
+                val explainer = if (syncMode == SyncMode.MANUAL) R.string.pending_explainer_manual else R.string.pending_explainer
+                Text(item.rejectedReason ?: item.lastError ?: stringResource(explainer))
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showDialog = false
