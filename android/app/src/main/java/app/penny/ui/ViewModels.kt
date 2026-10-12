@@ -229,10 +229,14 @@ class SetupViewModel(private val repository: Repository, discovery: Discovery) :
 }
 
 data class AddForm(
-    val kind: Kind = Kind.EXPENSE,
+    /** Signed: a leading minus makes an expense, a plus or no sign an income. */
     val amount: String = "",
+    /** The user picked the sign, so choosing a category no longer sets it. */
+    val signChosen: Boolean = false,
     val accountId: String? = null,
     val categoryId: String? = null,
+    /** Picked in place of a category, as in Money: a transfer to this account (a minus) or from it (a plus). */
+    val transferAccountId: String? = null,
     val payee: String = "",
     val date: LocalDate = LocalDate.now(),
     val note: String = "",
@@ -243,7 +247,8 @@ data class AddForm(
     val rateEdited: Boolean = false,
     @StringRes val error: Int? = null,
 ) {
-    val parsedAmount: BigDecimal? get() = Format.parseAmount(amount)
+    val kind: Kind get() = if (amount.startsWith('-')) Kind.EXPENSE else Kind.INCOME
+    val parsedAmount: BigDecimal? get() = Format.parseAmount(amount.trimStart('+', '-'))
     val parsedRate: BigDecimal? get() = Format.parseRate(rate)
 }
 
@@ -285,7 +290,20 @@ class AddTransactionViewModel(
             ?: candidates.filter { !it.hasInvestments }.maxByOrNull { it.transactionCount }?.id
     }
 
-    fun update(block: (AddForm) -> AddForm) = _form.update { withSuggestedRate(block(it)).copy(error = null) }
+    fun update(block: (AddForm) -> AddForm) = _form.update { withSuggestedRate(withValidTransfer(block(it))).copy(error = null) }
+
+    /**
+     * A transfer needs another account in the same currency, and is in that currency: the Mac can't write transfers
+     * between currencies yet.
+     */
+    private fun withValidTransfer(form: AddForm): AddForm {
+        val id = form.transferAccountId ?: return form
+        val accounts = repository.state.value.snapshot?.accounts.orEmpty()
+        val from = accounts.firstOrNull { it.id == form.accountId }
+        val to = accounts.firstOrNull { it.id == id }
+        return if (from == null || to == null || to.id == from.id || to.currency != from.currency) form.copy(transferAccountId = null)
+        else form.copy(currency = null)
+    }
 
     fun setCurrency(currency: String) = update { it.copy(currency = currency, rateEdited = false) }
 
@@ -293,17 +311,54 @@ class AddTransactionViewModel(
         it.copy(rate = text.filter { c -> c.isDigit() || c == ',' || c == '.' }, rateEdited = true)
     }
 
-    fun setKind(kind: Kind) = update {
-        val category = repository.state.value.snapshot?.categories?.firstOrNull { c -> c.id == it.categoryId }
-        it.copy(kind = kind, categoryId = it.categoryId.takeIf { category?.kind == kind.api })
+    /** Keeps digits and separators, and one leading sign: a sign typed anywhere replaces the current one. */
+    fun setAmount(text: String) = update { form ->
+        val normalized = text.replace('\u2212', '-')
+        val signs = normalized.filter { it == '+' || it == '-' }
+        val oldSign = form.amount.firstOrNull()?.takeIf { it == '+' || it == '-' }
+        val sign = signs.firstOrNull { it != oldSign } ?: oldSign?.takeIf { it in signs }
+        val amount = sign?.toString().orEmpty() + normalized.filter { it.isDigit() || it == ',' || it == '.' }
+        form.copy(
+            amount = amount,
+            // Clearing the field lets the next category pick set the sign again.
+            signChosen = amount.isNotEmpty() && (form.signChosen || sign != oldSign),
+        )
+    }
+
+    /** Flips between expense and income. */
+    fun toggleSign() = update { form ->
+        val digits = form.amount.trimStart('+', '-')
+        form.copy(amount = (if (form.kind == Kind.EXPENSE) "+" else "-") + digits, signChosen = true)
+    }
+
+    fun setCategory(id: String?) = update { withCategorySign(it.copy(categoryId = id, transferAccountId = null)) }
+
+    /** Until the user picks a sign, a transfer goes out of the form's account. */
+    fun setTransfer(accountId: String) = update { form ->
+        val digits = form.amount.trimStart('+', '-')
+        form.copy(transferAccountId = accountId, categoryId = null, amount = if (form.signChosen) form.amount else "-$digits")
+    }
+
+    /** Until the user picks a sign, it follows the category: a minus for an expense category, none for income. */
+    private fun withCategorySign(form: AddForm): AddForm {
+        if (form.signChosen) return form
+        val category = repository.state.value.snapshot?.categories?.firstOrNull { it.id == form.categoryId } ?: return form
+        val digits = form.amount.trimStart('+', '-')
+        return when (category.kind) {
+            Kind.EXPENSE.api -> form.copy(amount = "-$digits")
+            Kind.INCOME.api -> form.copy(amount = digits)
+            else -> form
+        }
     }
 
     /** Picking a known payee fills in its usual category. */
     fun setPayee(name: String, fromSuggestion: Boolean) = update { form ->
         val payee = repository.state.value.snapshot?.payees?.firstOrNull { it.name.equals(name, ignoreCase = true) }
         val category = repository.state.value.snapshot?.categories?.firstOrNull { it.id == payee?.categoryId }
-        if (fromSuggestion && form.categoryId == null && category != null && category.kind == form.kind.api) {
-            form.copy(payee = name, categoryId = category.id)
+        if (fromSuggestion && form.categoryId == null && form.transferAccountId == null && category != null &&
+            category.kind in Kind.entries.map { it.api }
+        ) {
+            withCategorySign(form.copy(payee = name, categoryId = category.id))
         } else {
             form.copy(payee = name)
         }
@@ -326,11 +381,14 @@ class AddTransactionViewModel(
         val zone = ZoneId.systemDefault()
         // Today keeps the current time (as Money does); other days get noon so time zones can't shift the date.
         val time = if (form.date == LocalDate.now(zone)) LocalTime.now(zone) else LocalTime.NOON
+        // A transfer goes from one account to the other: with a plus, from the picked account into the form's.
+        val transferIn = form.transferAccountId != null && form.kind == Kind.INCOME
         val request = NewTransactionRequest(
             clientId = repository.newClientId(),
-            accountId = form.accountId!!,
+            accountId = if (transferIn) form.transferAccountId!! else form.accountId!!,
+            transferAccountId = if (transferIn) form.accountId else form.transferAccountId,
             date = ZonedDateTime.of(form.date, time, zone).toInstant().toString(),
-            kind = form.kind.api,
+            kind = if (form.transferAccountId != null) NewTransactionRequest.TRANSFER else form.kind.api,
             amount = amount!!.toPlainString(),
             categoryId = form.categoryId,
             payeeName = form.payee.trim().ifEmpty { null },

@@ -139,8 +139,11 @@
     <string name="add_title">Nowa transakcja</string>
     <string name="add_connect_first">Najpierw połącz się z Makiem, aby pobrać konta i kategorie.</string>
     <string name="add_writes_disabled">Zapis jest wyłączony w konfiguracji mostu na Macu.</string>
-    <string name="kind_expense">Wydatek</string>
-    <string name="kind_income">Przychód</string>
+    <string name="amount_expense">Wydatek. Usuń minus, żeby wpisać przychód.</string>
+    <string name="amount_income">Przychód. Zacznij od minusa, żeby wpisać wydatek.</string>
+    <string name="amount_toggle_sign">Przełącz między wydatkiem a przychodem</string>
+    <string name="amount_transfer_out">Przelew na konto „%1$s”. Usuń minus, aby przelać w drugą stronę.</string>
+    <string name="amount_transfer_in">Przelew z konta „%1$s”. Zacznij od minusa, aby przelać w drugą stronę.</string>
     <string name="field_amount">Kwota</string>
     <string name="field_account">Konto</string>
     <string name="field_category">Kategoria</string>
@@ -162,7 +165,7 @@
     <string name="add_footer">Transakcja trafi do Money na Macu przy najbliższym połączeniu, a stamtąd do iCloud.</string>
     <string name="search">Szukaj</string>
     <string name="categories_frequent">Najczęściej używane</string>
-    <string name="categories_all">Wszystkie</string>
+    <string name="categories_transfers">Przelew na konto lub z konta</string>
     <string name="categories_no_match">Brak pasujących kategorii</string>
 
     <!-- Setup -->

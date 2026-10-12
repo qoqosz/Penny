@@ -5,11 +5,14 @@ struct NewTransactionRequest: Codable {
     let clientId: String
     let accountId: String
     let date: Date
-    /// "expense" or "income".
+    /// "expense", "income" or "transfer" (from `accountId` to `transferAccountId`).
     let kind: String
     /// Positive decimal, "." separator.
     let amount: String
+    /// Transfers have none.
     let categoryId: String?
+    /// The account a transfer goes to; it gets its own transaction with the opposite sign, as in Money.
+    let transferAccountId: String?
     let payeeName: String?
     let note: String?
     /// Set when the amount is in another currency than the account's: one of Money's currencies,
@@ -86,29 +89,40 @@ final class TransactionWriter {
         created[request.clientId] = CreatedRecord(transactionId: transactionID, created: Date())
         let cutoff = Date().addingTimeInterval(-180 * 86400)
         try? JSONFile.write(created.filter { $0.value.created > cutoff }, to: Paths.created)
-        let foreign = plan.currency == plan.account.currency ? "" : " \(plan.currency) at \(plan.rate.plainString)"
-        Log.info("Added transaction \(transactionID): \(plan.signedAmount.plainString)\(foreign) in account “\(plan.account.name)”")
+        let foreign = plan.currency == plan.entries[0].account.currency ? "" : " \(plan.currency) at \(plan.rate.plainString)"
+        let accounts = plan.entries.map { "“\($0.account.name)”" }.joined(separator: " → ")
+        Log.info("Added \(plan.entries.count > 1 ? "transfer" : "transaction") \(transactionID): "
+            + "\(plan.entries[0].signedAmount.plainString)\(foreign) in \(accounts)")
         return transactionID
+    }
+
+    /// One transaction to insert: a single split in one account.
+    private struct Entry {
+        let account: AccountDTO
+        let transactionType: Int
+        let splitType: Int
+        let flags: [String: Any]
+        let hasCurrencyCode: Bool
+        let categoryID: String?
+        /// In the plan's currency.
+        let signedAmount: Decimal
+        /// Transfers: the split holds `transferSplit`, pointing at the other entry's split.
+        let holdsLink: Bool
     }
 
     private struct Plan {
         let request: NewTransactionRequest
-        let account: AccountDTO
-        let category: CategoryDTO?
-        let template: TransactionTemplate
-        /// In `currency`.
-        let signedAmount: Decimal
+        /// One, or for a transfer the outgoing and the incoming side (whose splits are linked).
+        let entries: [Entry]
         let currency: String
-        /// One unit of `currency` in the account's currency (1 when they're the same).
+        /// One unit of `currency` in the accounts' currency (1 when they're the same).
         let rate: Decimal
         let payeeName: String?
         let note: String?
-
-        var amountInAccountCurrency: Decimal { signedAmount * rate }
     }
 
     private func validate(_ r: NewTransactionRequest, snapshot: MoneySnapshot) throws -> Plan {
-        guard let kind = Kind(rawValue: r.kind), kind == .expense || kind == .income else {
+        guard let kind = Kind(rawValue: r.kind), kind != .system else {
             throw BridgeError.invalid("Nieobsługiwany rodzaj transakcji: \(r.kind)", en: "Unsupported transaction kind: \(r.kind)")
         }
         guard let amount = Decimal.parse(r.amount), amount > 0, amount < 1_000_000_000 else {
@@ -116,6 +130,20 @@ final class TransactionWriter {
         }
         guard let account = snapshot.account(r.accountId) else { throw BridgeError.invalid("Nie ma takiego konta.", en: "No such account.") }
         guard !account.closed else { throw BridgeError.invalid("Konto „\(account.name)” jest zamknięte.", en: "The account “\(account.name)” is closed.") }
+        let payee = r.payeeName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let note = r.note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (payee?.count ?? 0) <= 200, (note?.count ?? 0) <= 2000 else {
+            throw BridgeError.invalid("Za długi odbiorca lub notatka.", en: "The payee or note is too long.")
+        }
+        let payeeName = payee?.isEmpty == false ? payee : nil
+        let noteText = note?.isEmpty == false ? note : nil
+
+        if kind == .transfer {
+            return try validateTransfer(r, amount: amount, from: account, snapshot: snapshot, payeeName: payeeName, note: noteText)
+        }
+        guard r.transferAccountId == nil else {
+            throw BridgeError.invalid("Konto docelowe ma tylko przelew.", en: "Only a transfer has a target account.")
+        }
         var category: CategoryDTO?
         if let id = r.categoryId {
             guard let c = snapshot.category(id), c.kind == Kind.expense.rawValue || c.kind == Kind.income.rawValue else {
@@ -135,11 +163,6 @@ final class TransactionWriter {
             currency = code
             rate = value
         }
-        let payee = r.payeeName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let note = r.note?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (payee?.count ?? 0) <= 200, (note?.count ?? 0) <= 2000 else {
-            throw BridgeError.invalid("Za długi odbiorca lub notatka.", en: "The payee or note is too long.")
-        }
 
         // Prefer the same category with the same sign, then anything of the same kind.
         let byCategory = category.flatMap { snapshot.templatesByCategory[$0.id] }.flatMap { $0.kind == kind ? $0 : nil }
@@ -148,9 +171,70 @@ final class TransactionWriter {
                 "Brak wzorcowej transakcji typu „\(kind.rawValue)” w Money — dodaj jedną ręcznie na Macu.",
                 en: "Money has no template transaction of kind “\(kind.rawValue)”. Add one by hand on the Mac.")
         }
-        return Plan(request: r, account: account, category: category, template: template,
-                    signedAmount: kind == .expense ? -amount : amount, currency: currency, rate: rate,
-                    payeeName: payee?.isEmpty == false ? payee : nil, note: note?.isEmpty == false ? note : nil)
+        let entry = Entry(
+            account: account, transactionType: template.transactionType, splitType: template.splitType, flags: template.flags,
+            hasCurrencyCode: template.hasCurrencyCode, categoryID: category?.id,
+            signedAmount: kind == .expense ? -amount : amount, holdsLink: false)
+        return Plan(request: r, entries: [entry], currency: currency, rate: rate, payeeName: payeeName, note: noteText)
+    }
+
+    /// A transfer is two transactions, like Money's own: minus in the account it leaves, plus in the one it goes to.
+    private func validateTransfer(_ r: NewTransactionRequest, amount: Decimal, from: AccountDTO, snapshot: MoneySnapshot,
+                                  payeeName: String?, note: String?) throws -> Plan {
+        guard let id = r.transferAccountId else {
+            throw BridgeError.invalid("Przelew nie ma konta docelowego.", en: "The transfer has no target account.")
+        }
+        guard let to = snapshot.account(id) else { throw BridgeError.invalid("Nie ma takiego konta.", en: "No such account.") }
+        guard !to.closed else { throw BridgeError.invalid("Konto „\(to.name)” jest zamknięte.", en: "The account “\(to.name)” is closed.") }
+        guard to.id != from.id else {
+            throw BridgeError.invalid("Przelew musi być między dwoma różnymi kontami.", en: "A transfer needs two different accounts.")
+        }
+        guard r.categoryId == nil else {
+            throw BridgeError.invalid("Przelew nie może mieć kategorii.", en: "A transfer can't have a category.")
+        }
+        guard to.currency == from.currency else {
+            throw BridgeError.invalid(
+                "Przelewy między kontami w różnych walutach (\(from.currency) i \(to.currency)) nie są jeszcze obsługiwane.",
+                en: "Transfers between accounts in different currencies (\(from.currency) and \(to.currency)) aren't supported yet.")
+        }
+        if let code = r.currency, code != from.currency {
+            throw BridgeError.invalid("Przelew musi być w walucie kont (\(from.currency)).",
+                                      en: "A transfer must be in the accounts' currency (\(from.currency)).")
+        }
+        let shape = TransferShape(outgoingInvestments: from.hasInvestments, incomingInvestments: to.hasInvestments)
+        guard let template = snapshot.transferTemplates[shape] else {
+            let kind = from.hasInvestments || to.hasInvestments ? "z kontem inwestycyjnym " : ""
+            let kindEN = from.hasInvestments || to.hasInvestments ? "involving an investment account " : ""
+            throw BridgeError.invalid(
+                "Brak wzorcowego przelewu \(kind)w Money (z „\(from.name)” na „\(to.name)”) — zrób jeden taki ręcznie na Macu.",
+                en: "Money has no template transfer \(kindEN)like this one (from “\(from.name)” to “\(to.name)”). Make one by hand on the Mac.")
+        }
+
+        func category(_ rule: TransferCategory, own: AccountDTO, other: AccountDTO) throws -> String? {
+            let account: AccountDTO
+            switch rule {
+            case .none: return nil
+            case .fixed(let id): return id
+            case .otherAccount: account = other
+            case .ownAccount: account = own
+            }
+            guard let id = snapshot.accountCategories[account.id]?.first else {
+                throw BridgeError.invalid(
+                    "Money nie ma jeszcze kategorii dla konta „\(account.name)”. Zrób jeden przelew z tym kontem ręcznie na Macu.",
+                    en: "Money has no category for the account “\(account.name)” yet. Make one transfer with it by hand on the Mac.")
+            }
+            return id
+        }
+        func entry(_ side: TransferTemplate.Side, own: AccountDTO, other: AccountDTO, amount: Decimal) throws -> Entry {
+            Entry(account: own, transactionType: side.transactionType, splitType: side.splitType, flags: side.flags,
+                  hasCurrencyCode: side.hasCurrencyCode, categoryID: try category(side.category, own: own, other: other),
+                  signedAmount: amount, holdsLink: side.holdsLink)
+        }
+        return Plan(
+            request: r,
+            entries: [try entry(template.outgoing, own: from, other: to, amount: -amount),
+                      try entry(template.incoming, own: to, other: from, amount: amount)],
+            currency: from.currency, rate: 1, payeeName: payeeName, note: note)
     }
 
     private func insert(_ plan: Plan, snapshot: MoneySnapshot) throws -> (transactionID: String, objects: [InsertedObject]) {
@@ -168,8 +252,6 @@ final class TransactionWriter {
                 return object
             }
 
-            let account = try lookup("Account", plan.account.id)
-            let category = try plan.category.map { try lookup("Category", $0.id) }
             let now = Date()
             var newObjects: [NSManagedObject] = []
 
@@ -180,49 +262,62 @@ final class TransactionWriter {
                     let p = NSEntityDescription.insertNewObject(forEntityName: "Payee", into: ctx)
                     p.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
                     p.setValue(name, forKey: "name")
-                    p.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
+                    p.setValue(try lookup("Account", plan.entries[0].account.id).value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
                     newObjects.append(p)
                     payee = p
                 }
             }
 
-            let tx = NSEntityDescription.insertNewObject(forEntityName: "Transaction", into: ctx)
-            for (key, value) in plan.template.flags { tx.setValue(value is NSNull ? nil : value, forKey: key) }
-            tx.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
-            tx.setValue(plan.request.date, forKey: "date")
-            tx.setValue(now, forKey: "lastModificationDate")
-            tx.setValue(NSNumber(value: Int16(plan.template.transactionType)), forKey: "transactionType")
-            tx.setValue(NSNumber(value: Int16(0)), forKey: "reconciledStatus")
-            // Money leaves the code out on some older transactions, but always sets it for another currency.
-            if plan.template.hasCurrencyCode || plan.currency != plan.account.currency {
-                tx.setValue(plan.currency, forKey: "currencyCode")
-            }
-            tx.setValue(NSDecimalNumber(decimal: plan.rate), forKey: "currencyRateToAccountCurrency")
-            tx.setValue(plan.payeeName, forKey: "payeeName")
-            tx.setValue(payee, forKey: "payee")
-            tx.setValue(plan.note, forKey: "note")
-            tx.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
-            tx.setValue(account, forKey: "account")
-            newObjects.append(tx)
+            var inserted: [(tx: NSManagedObject, split: NSManagedObject)] = []
+            for entry in plan.entries {
+                let account = try lookup("Account", entry.account.id)
+                let category = try entry.categoryID.map { try lookup("Category", $0) }
 
-            let split = NSEntityDescription.insertNewObject(forEntityName: "TransactionSplit", into: ctx)
-            split.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
-            // Like Money: the amount in the transaction's currency, and its exact (unrounded) value in the account's.
-            split.setValue(NSDecimalNumber(decimal: plan.signedAmount), forKey: "amount")
-            split.setValue(NSDecimalNumber(decimal: plan.amountInAccountCurrency), forKey: "amountInAccountCurrency")
-            split.setValue(NSNumber(value: Int64(plan.template.splitType)), forKey: "type")
-            split.setValue(now, forKey: "createdDate")
-            // categoryRepresentationString holds the category name from bank imports; manual entries leave it empty.
-            split.setValue(category, forKey: "category")
-            split.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
-            split.setValue(tx, forKey: "transaction")
-            newObjects.append(split)
+                let tx = NSEntityDescription.insertNewObject(forEntityName: "Transaction", into: ctx)
+                for (key, value) in entry.flags { tx.setValue(value is NSNull ? nil : value, forKey: key) }
+                tx.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
+                tx.setValue(plan.request.date, forKey: "date")
+                tx.setValue(now, forKey: "lastModificationDate")
+                tx.setValue(NSNumber(value: Int16(entry.transactionType)), forKey: "transactionType")
+                tx.setValue(NSNumber(value: Int16(0)), forKey: "reconciledStatus")
+                // Money leaves the code out on some older transactions, but always sets it for another currency.
+                if entry.hasCurrencyCode || plan.currency != entry.account.currency {
+                    tx.setValue(plan.currency, forKey: "currencyCode")
+                }
+                tx.setValue(NSDecimalNumber(decimal: plan.rate), forKey: "currencyRateToAccountCurrency")
+                tx.setValue(plan.payeeName, forKey: "payeeName")
+                tx.setValue(payee, forKey: "payee")
+                tx.setValue(plan.note, forKey: "note")
+                tx.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
+                tx.setValue(account, forKey: "account")
+                newObjects.append(tx)
+
+                let split = NSEntityDescription.insertNewObject(forEntityName: "TransactionSplit", into: ctx)
+                split.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
+                // Like Money: the amount in the transaction's currency, and its exact (unrounded) value in the account's.
+                split.setValue(NSDecimalNumber(decimal: entry.signedAmount), forKey: "amount")
+                split.setValue(NSDecimalNumber(decimal: entry.signedAmount * plan.rate), forKey: "amountInAccountCurrency")
+                split.setValue(NSNumber(value: Int64(entry.splitType)), forKey: "type")
+                split.setValue(now, forKey: "createdDate")
+                // categoryRepresentationString holds the category name from bank imports; manual entries leave it empty.
+                split.setValue(category, forKey: "category")
+                split.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
+                split.setValue(tx, forKey: "transaction")
+                newObjects.append(split)
+                inserted.append((tx, split))
+            }
+            // A transfer's splits point at each other; setting one side also sets the inverse on the other.
+            if inserted.count == 2 {
+                let (outgoing, incoming) = (inserted[0].split, inserted[1].split)
+                if plan.entries[0].holdsLink { outgoing.setValue(incoming, forKey: "transferSplit") }
+                if plan.entries[1].holdsLink { incoming.setValue(outgoing, forKey: "transferSplit") }
+            }
 
             try ctx.save()
             let objects = newObjects.map {
                 InsertedObject(entity: $0.entityName, uniqueID: $0.string("uniqueIdentifier") ?? "")
             }
-            return (tx.publicID, objects)
+            return (inserted[0].tx.publicID, objects)
         }
     }
 }

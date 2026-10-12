@@ -215,18 +215,36 @@ data class NewTransactionRequest(
     val accountId: String,
     /** ISO-8601 instant. */
     val date: String,
-    /** "expense" or "income". */
+    /** "expense", "income" or [TRANSFER] (from [accountId] to [transferAccountId]). */
     val kind: String,
     /** Positive decimal with "." separator. */
     val amount: String,
+    /** Transfers have none. */
     val categoryId: String? = null,
+    /** Where a transfer goes; the Mac adds it to both accounts, with a minus in [accountId] and a plus in this one. */
+    val transferAccountId: String? = null,
     val payeeName: String? = null,
     val note: String? = null,
     /** Set when [amount] is in another currency than the account's: one of [Snapshot.currencies]. */
     val currency: String? = null,
     /** One unit of [currency] in the account's currency, "." separator. */
     val exchangeRate: String? = null,
-)
+) {
+    val isTransfer: Boolean get() = kind == TRANSFER
+
+    fun involves(accountId: String): Boolean = this.accountId == accountId || transferAccountId == accountId
+
+    /** Signed as [accountId]'s list shows it: a transfer is a plus in the account it goes to. */
+    fun signedAmount(accountId: String? = null): String = when {
+        isTransfer -> if (accountId != null && accountId == transferAccountId) amount else "-$amount"
+        kind == Kind.EXPENSE.api -> "-$amount"
+        else -> amount
+    }
+
+    companion object {
+        const val TRANSFER = "transfer"
+    }
+}
 
 /** A transaction entered on the phone that the Mac hasn't confirmed yet. */
 @Serializable

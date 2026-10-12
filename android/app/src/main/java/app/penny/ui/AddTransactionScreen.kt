@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -37,9 +38,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,6 +52,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -62,6 +62,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
+import app.penny.data.Account
 import app.penny.data.Category
 import app.penny.data.HiddenAccounts
 import app.penny.data.IconStore
@@ -105,6 +106,8 @@ fun AddTransactionScreen(
         }
         val account = snapshot.accounts.firstOrNull { it.id == form.accountId }
         val category = snapshot.categories.firstOrNull { it.id == form.categoryId }
+        val transferAccount = snapshot.accounts.firstOrNull { it.id == form.transferAccountId }
+        val expense = form.kind == Kind.EXPENSE
         Column(
             Modifier
                 .padding(padding)
@@ -117,46 +120,11 @@ fun AddTransactionScreen(
             if (!snapshot.writesEnabled) {
                 Text(stringResource(R.string.add_writes_disabled), color = MaterialTheme.colorScheme.error)
             }
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                Kind.entries.forEachIndexed { index, kind ->
-                    SegmentedButton(
-                        selected = form.kind == kind,
-                        onClick = { vm.setKind(kind) },
-                        shape = SegmentedButtonDefaults.itemShape(index, Kind.entries.size),
-                    ) { Text(stringResource(if (kind == Kind.EXPENSE) R.string.kind_expense else R.string.kind_income)) }
-                }
-            }
-
-            val accountCurrency = account?.currency ?: snapshot.defaultCurrency ?: ""
-            // Bridges that send Money's currencies can write transactions in them.
-            val currencies = snapshot.currencies?.let { (listOf(accountCurrency) + it).filter(String::isNotEmpty).distinct() }.orEmpty()
-            val currency = form.currency ?: accountCurrency
-            OutlinedTextField(
-                value = form.amount,
-                onValueChange = { text -> vm.update { it.copy(amount = text.filter { c -> c.isDigit() || c == ',' || c == '.' }) } },
-                label = { Text(stringResource(R.string.field_amount)) },
-                suffix = if (currencies.size > 1) null else { { Text(currency) } },
-                trailingIcon = if (currencies.size > 1) { { CurrencyMenu(currency, currencies, vm::setCurrency) } } else null,
-                singleLine = true,
-                textStyle = MaterialTheme.typography.headlineSmall,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
-                isError = form.amount.isNotEmpty() && form.parsedAmount == null,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            if (form.currency != null) RateField(form, accountCurrency, vm)
-
             AccountPicker(
                 // A hidden account stays listed when it's preselected (opened from its own screen).
                 accounts = snapshot.accounts.filter { !it.closed && (!it.isHidden(hidden) || it.id == form.accountId) },
                 selectedId = form.accountId,
                 onSelect = { id -> vm.update { it.copy(accountId = id) } },
-            )
-
-            ClickableField(
-                label = stringResource(R.string.field_category),
-                value = category?.fullName ?: stringResource(R.string.no_category),
-                onClick = { pickCategory = true },
             )
 
             PayeeField(
@@ -165,6 +133,53 @@ fun AddTransactionScreen(
                 icons = repository.icons,
                 onChange = { text, fromSuggestion -> vm.setPayee(text, fromSuggestion) },
             )
+
+            ClickableField(
+                label = stringResource(R.string.field_category),
+                value = when {
+                    transferAccount != null ->
+                        stringResource(if (expense) R.string.transfer_to else R.string.transfer_from, transferAccount.name)
+                    else -> category?.fullName ?: stringResource(R.string.no_category)
+                },
+                onClick = { pickCategory = true },
+            )
+
+            val accountCurrency = account?.currency ?: snapshot.defaultCurrency ?: ""
+            // Bridges that send Money's currencies can write transactions in them; transfers stay in the accounts' own.
+            val currencies = if (transferAccount != null) emptyList()
+            else snapshot.currencies?.let { (listOf(accountCurrency) + it).filter(String::isNotEmpty).distinct() }.orEmpty()
+            val currency = form.currency ?: accountCurrency
+            val amountColor = if (expense) AmountColors.expenseEmphasis else AmountColors.income
+            OutlinedTextField(
+                value = form.amount,
+                onValueChange = vm::setAmount,
+                label = { Text(stringResource(R.string.field_amount)) },
+                leadingIcon = {
+                    val toggleSign = stringResource(R.string.amount_toggle_sign)
+                    IconButton(onClick = vm::toggleSign, modifier = Modifier.semantics { contentDescription = toggleSign }) {
+                        Text("±", style = MaterialTheme.typography.titleLarge, color = amountColor)
+                    }
+                },
+                suffix = if (currencies.size > 1) null else { { Text(currency) } },
+                trailingIcon = if (currencies.size > 1) { { CurrencyMenu(currency, currencies, vm::setCurrency) } } else null,
+                supportingText = {
+                    Text(
+                        when {
+                            transferAccount != null && expense -> stringResource(R.string.amount_transfer_out, transferAccount.name)
+                            transferAccount != null -> stringResource(R.string.amount_transfer_in, transferAccount.name)
+                            expense -> stringResource(R.string.amount_expense)
+                            else -> stringResource(R.string.amount_income)
+                        }
+                    )
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.headlineSmall.copy(color = amountColor),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                isError = form.amount.trimStart('+', '-').isNotEmpty() && form.parsedAmount == null,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (form.currency != null) RateField(form, accountCurrency, vm)
 
             ClickableField(
                 label = stringResource(R.string.field_date),
@@ -195,9 +210,16 @@ fun AddTransactionScreen(
 
         if (pickCategory) {
             CategoryPicker(
-                categories = snapshot.categories.filter { it.kind == form.kind.api },
+                // The amount's sign decides the kind, so both kinds are offered (e.g. a refund in an expense category).
+                categories = snapshot.categories.filter { c -> Kind.entries.any { it.api == c.kind } },
+                // Like Money, the other accounts follow as transfer targets: open ones in the same currency.
+                accounts = snapshot.accounts.filter {
+                    !it.closed && it.id != form.accountId && it.currency == account?.currency &&
+                        (!it.isHidden(hidden) || it.id == form.transferAccountId)
+                },
                 icons = repository.icons,
-                onPick = { id -> vm.update { it.copy(categoryId = id) }; pickCategory = false },
+                onPick = { id -> vm.setCategory(id); pickCategory = false },
+                onPickAccount = { id -> vm.setTransfer(id); pickCategory = false },
                 onDismiss = { pickCategory = false },
             )
         }
@@ -299,7 +321,7 @@ private fun ClickableField(label: String, value: String, onClick: () -> Unit, tr
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AccountPicker(accounts: List<app.penny.data.Account>, selectedId: String?, onSelect: (String) -> Unit) {
+private fun AccountPicker(accounts: List<Account>, selectedId: String?, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val selected = accounts.firstOrNull { it.id == selectedId }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
@@ -362,10 +384,20 @@ private fun PayeeField(value: String, suggestions: List<Payee>, icons: IconStore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CategoryPicker(categories: List<Category>, icons: IconStore, onPick: (String?) -> Unit, onDismiss: () -> Unit) {
+private fun CategoryPicker(
+    categories: List<Category>,
+    accounts: List<Account>,
+    icons: IconStore,
+    onPick: (String?) -> Unit,
+    onPickAccount: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     var query by rememberSaveable { mutableStateOf("") }
     val filtered = remember(query, categories) {
         if (query.isBlank()) categories else categories.filter { it.fullName.contains(query.trim(), ignoreCase = true) }
+    }
+    val filteredAccounts = remember(query, accounts) {
+        if (query.isBlank()) accounts else accounts.filter { it.name.contains(query.trim(), ignoreCase = true) }
     }
     val frequent = remember(categories) { categories.filter { it.usageCount > 0 }.sortedByDescending { it.usageCount }.take(6) }
 
@@ -393,11 +425,30 @@ private fun CategoryPicker(categories: List<Category>, icons: IconStore, onPick:
                             item { SectionHeader(stringResource(R.string.categories_frequent)) }
                             items(frequent, key = { "f-" + it.id }) { CategoryRow(it, icons, onPick) }
                             item { HorizontalDivider() }
-                            item { SectionHeader(stringResource(R.string.categories_all)) }
                         }
                     }
-                    items(filtered, key = { it.id }) { CategoryRow(it, icons, onPick) }
-                    if (filtered.isEmpty()) item { EmptyState(stringResource(R.string.categories_no_match)) }
+                    for (kind in Kind.entries) {
+                        val ofKind = filtered.filter { it.kind == kind.api }
+                        if (ofKind.isEmpty()) continue
+                        item(key = "h-" + kind.api) {
+                            SectionHeader(stringResource(if (kind == Kind.EXPENSE) R.string.report_expenses else R.string.report_income))
+                        }
+                        items(ofKind, key = { it.id }) { CategoryRow(it, icons, onPick) }
+                    }
+                    if (filteredAccounts.isNotEmpty()) {
+                        item(key = "h-accounts") { SectionHeader(stringResource(R.string.categories_transfers)) }
+                        items(filteredAccounts, key = { "a-" + it.id }) { account ->
+                            ListRow(
+                                leading = { Icon(Icons.Outlined.SwapHoriz, contentDescription = null) },
+                                title = account.name,
+                                subtitle = account.folder.orEmpty(),
+                                modifier = Modifier.clickable { onPickAccount(account.id) },
+                            )
+                        }
+                    }
+                    if (filtered.isEmpty() && filteredAccounts.isEmpty()) {
+                        item { EmptyState(stringResource(R.string.categories_no_match)) }
+                    }
                 }
             }
         }

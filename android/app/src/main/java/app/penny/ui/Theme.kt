@@ -52,6 +52,11 @@ object AmountColors {
     val expense: Color
         @Composable @ReadOnlyComposable
         get() = MaterialTheme.colorScheme.onSurface
+
+    /** Red, for where the sign is the point, e.g. the amount being typed in the add form. */
+    val expenseEmphasis: Color
+        @Composable @ReadOnlyComposable
+        get() = if (isSystemInDarkTheme()) Color(0xFFFF9A8F) else Color(0xFFC0281E)
 }
 
 /** Money's tag colors (Money.app's asset catalog); unknown names get the outline color. */

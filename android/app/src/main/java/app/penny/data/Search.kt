@@ -32,6 +32,7 @@ class TransactionSearch(query: String) {
             request.payeeName, request.note, request.currency,
             snapshot?.category(request.categoryId)?.fullName,
             snapshot?.accounts?.firstOrNull { it.id == request.accountId }?.name,
+            snapshot?.accounts?.firstOrNull { it.id == request.transferAccountId }?.name,
             amountText(request.amount),
         ),
     )

@@ -68,7 +68,7 @@ enum SelfTest {
         print("Reading")
         let snap = try call("GET", "\(base)/snapshot", token: token)
         let accounts = snap.json["accounts"] as? [[String: Any]] ?? []
-        check(accounts.count == 2, "2 accounts")
+        check(accounts.count == 4, "4 accounts")
         check(snap.json["currencies"] as? [String] == ["PLN", "EUR"], "Money's currencies, the default first (\((snap.json["currencies"] as? [String])?.joined(separator: ", ") ?? "-"))")
         check(accounts.first?["folder"] as? String == "Archiwum" && accounts.first?["folderId"] is String,
               "account folder with an identifier")
@@ -209,7 +209,7 @@ enum SelfTest {
         check(rows.first?["sched"] as? Int64 == 0, "isScheduledTransaction flag copied")
         check(rows.first?["payee"] != nil && rows.first?["fok"] != nil, "payee relationship and ordered split")
         let maxPK = try db.query("SELECT Z_MAX m FROM Z_PRIMARYKEY WHERE Z_NAME = 'Transaction'").first?["m"] as? Int64
-        check(maxPK == 10, "Z_PRIMARYKEY updated (\(maxPK ?? -1))")
+        check(maxPK == 12, "Z_PRIMARYKEY updated (\(maxPK ?? -1))")
         let euroRow = try db.query("""
             SELECT t.ZCURRENCYCODE code, t.ZCURRENCYRATETOACCOUNTCURRENCY rate, s.ZAMOUNT amount, s.ZAMOUNTINACCOUNTCURRENCY acc
             FROM ZTRANSACTION t JOIN ZTRANSACTIONSPLIT s ON s.ZTRANSACTION = t.Z_PK WHERE t.ZUNIQUEIDENTIFIER = ?
@@ -223,15 +223,64 @@ enum SelfTest {
         let newPayee = (afterWrites.json["payees"] as? [[String: Any]])?.first { $0["name"] as? String == "Biedronka" }
         check(newPayee != nil && newPayee?["iconId"] == nil, "new payee without an icon")
 
+        print("Transfers")
+        let transfer = try call("POST", "\(base)/transactions", token: token, body: [
+            "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-04T09:00:00Z",
+            "kind": "transfer", "amount": "25", "transferAccountId": ids.savings, "note": "na wakacje",
+        ])
+        check(transfer.status == 201 && transfer.json["amount"] as? String == "-25" && transfer.json["kind"] as? String == "transfer",
+              "transfer: minus in the account it leaves (\(transfer.json["amount"] ?? transfer.text))")
+        let outSplit = (transfer.json["splits"] as? [[String: Any]])?.first
+        check(outSplit?["transferAccountId"] as? String == ids.savings, "outgoing side points at the target account")
+        let savingsItems = try call("GET", "\(base)/transactions?accountId=\(ids.savings)", token: token).json["items"] as? [[String: Any]] ?? []
+        let incoming = savingsItems.first { $0["note"] as? String == "na wakacje" }
+        check(incoming?["amount"] as? String == "25" && incoming?["kind"] as? String == "transfer"
+              && (incoming?["splits"] as? [[String: Any]])?.first?["transferAccountId"] as? String == ids.account,
+              "incoming side: plus in the target account, pointing back")
+        let afterTransfer = try call("GET", "\(base)/snapshot", token: token).json["accounts"] as? [[String: Any]] ?? []
+        func balanceOf(_ id: String) -> String? { afterTransfer.first { $0["id"] as? String == id }?["balance"] as? String }
+        check(balanceOf(ids.account) == "15.66" && balanceOf(ids.savings) == "75",
+              "balances 40.66 - 25 = 15.66 and 50 + 25 = 75 (got \(balanceOf(ids.account) ?? "-"), \(balanceOf(ids.savings) ?? "-"))")
+        let transferRows = try db.query("""
+            SELECT t.ZTRANSACTIONTYPE type, s.Z_PK pk, s.ZTYPE stype, c.ZUNIQUEIDENTIFIER cat,
+                   s.ZTRANSFERSPLIT link, s.ZTRANSFERSPLITINVERSE inverse
+            FROM ZTRANSACTION t JOIN ZTRANSACTIONSPLIT s ON s.ZTRANSACTION = t.Z_PK LEFT JOIN ZCATEGORY c ON s.ZCATEGORY = c.Z_PK
+            WHERE t.ZNOTE = 'na wakacje' ORDER BY s.ZAMOUNT
+            """)
+        let (outRow, inRow) = (transferRows.first, transferRows.last)
+        check(transferRows.count == 2 && outRow?["type"] as? Int64 == 30 && inRow?["type"] as? Int64 == 31
+              && outRow?["stype"] as? Int64 == 10 && inRow?["stype"] as? Int64 == 11,
+              "types copied from the template transfer, per side (\(transferRows))")
+        check(outRow?["cat"] as? String == ids.savingsCategory && inRow?["cat"] as? String == ids.accountCategory,
+              "each side in the other account's category, like the template")
+        check(outRow?["link"] as? Int64 == inRow?["pk"] as? Int64 && inRow?["inverse"] as? Int64 == outRow?["pk"] as? Int64
+              && inRow?["link"] == nil, "the outgoing split holds transferSplit, as in the template")
+        func transferCall(_ changes: [String: Any]) throws -> Response {
+            var body: [String: Any] = [
+                "clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-04T09:00:00Z",
+                "kind": "transfer", "amount": "5", "transferAccountId": ids.savings,
+            ]
+            body.merge(changes) { $1 }
+            return try call("POST", "\(base)/transactions", token: token, language: "en-US", body: body)
+        }
+        check(try transferCall(["transferAccountId": ids.account]).status == 422, "transfer to the same account rejected")
+        check(try transferCall(["categoryId": ids.food]).status == 422, "transfer with a category rejected")
+        check(try transferCall(["kind": "expense"]).status == 422, "a target account on an expense rejected")
+        check(try transferCall(["transferAccountId": NSNull()]).status == 422, "transfer without a target account rejected")
+        check(try transferCall(["currency": "EUR", "exchangeRate": "4.25"]).status == 422, "transfer in another currency rejected")
+        let toBroker = try transferCall(["transferAccountId": ids.broker])
+        check(toBroker.status == 422 && toBroker.errorMessage?.contains("investment") == true,
+              "no template for a transfer into an investment account (\(toBroker.errorMessage ?? "-"))")
+
         print("SyncKit")
         let sync = try SQLiteDB(path: location.syncStoreURL!.path)
         let tracked = try sync.query("SELECT ZIDENTIFIER i, ZENTITYTYPE t, ZSTATE s FROM ZQSSYNCEDENTITY WHERE ZSTATE = 0")
-        check(tracked.count == 7, "7 new rows to upload (3× transaction, 3× split, payee) — got \(tracked.count)")
+        check(tracked.count == 11, "11 new rows to upload (5× transaction, 5× split, payee) — got \(tracked.count)")
         check(tracked.contains { $0["i"] as? String == "Transaction.\(createdID)" }, "identifier “Transaction.<uuid>”")
         check(Set(tracked.compactMap { $0["t"] as? String }) == ["Transaction", "TransactionSplit", "Payee"], "entity types")
 
         let backups = (try? FileManager.default.contentsOfDirectory(atPath: Paths.backups.path)) ?? []
-        check(backups.count == 3, "backups before every write")
+        check(backups.count == 4, "backups before every write")
 
         print(failures == 0 ? "\nALL OK" : "\nFAILURES: \(failures)")
         if failures > 0 { exit(1) }
@@ -239,6 +288,10 @@ enum SelfTest {
 
     private struct Seeded {
         let account: String
+        let accountCategory: String
+        let savings: String
+        let savingsCategory: String
+        let broker: String
         let food: String
         let salary: String
         let lidl: String
@@ -315,8 +368,32 @@ enum SelfTest {
                 }
             }
 
+            // Money keeps a category for each account. A transfer from cash to savings is the template for the phone's;
+            // made-up values (types 30/31, split types 10/11) check that each side is copied.
+            let savings = make("Account", ["name": "Oszczędności", "currency": pln, "sortOrder": 2])
+            let cash = make("Account", ["name": "Gotówka", "currency": pln, "sortOrder": 3])
+            var accountCategories: [NSManagedObject] = []
+            for a in [account, savings, cash, broker] {
+                accountCategories.append(make("Category", ["name": a.string("name")!, "categoryType": 20, "account": a]))
+            }
+            var transferSplits: [NSManagedObject] = []
+            for (a, other, type, splitType, amount) in [(cash, accountCategories[1], 30, 10, "-50"), (savings, accountCategories[2], 31, 11, "50")] {
+                let tx = make("Transaction", [
+                    "account": a, "date": Date(timeIntervalSinceNow: -3 * 86400), "transactionType": type,
+                    "isScheduledTransaction": false, "readonly": false, "currencyCode": "PLN",
+                    "currencyRateToAccountCurrency": NSDecimalNumber(string: "1"),
+                ])
+                transferSplits.append(make("TransactionSplit", [
+                    "transaction": tx, "amount": NSDecimalNumber(string: amount), "amountInAccountCurrency": NSDecimalNumber(string: amount),
+                    "category": other, "type": splitType,
+                ]))
+            }
+            transferSplits[0].setValue(transferSplits[1], forKey: "transferSplit")
+
             try ctx.save()
-            return Seeded(account: account.publicID, food: food.publicID, salary: salary.publicID, lidl: lidl.publicID)
+            return Seeded(account: account.publicID, accountCategory: accountCategories[0].publicID, savings: savings.publicID,
+                          savingsCategory: accountCategories[1].publicID, broker: broker.publicID,
+                          food: food.publicID, salary: salary.publicID, lidl: lidl.publicID)
         }
         store.close()
 

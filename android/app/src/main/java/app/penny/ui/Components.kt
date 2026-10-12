@@ -151,14 +151,22 @@ fun TransactionRow(
     )
 }
 
+/** [accountId] is the account whose list shows the row, which decides a transfer's sign (null: the one it leaves). */
 @Composable
-fun PendingRow(item: PendingTransaction, snapshot: Snapshot?, repository: Repository) {
+fun PendingRow(item: PendingTransaction, snapshot: Snapshot?, repository: Repository, accountId: String? = null) {
     val scope = rememberCoroutineScope()
     var showDialog by remember { mutableStateOf(false) }
     val r = item.request
-    val account = snapshot?.accounts?.firstOrNull { it.id == r.accountId }
-    val category = snapshot?.categories?.firstOrNull { it.id == r.categoryId }?.fullName
-    val signed = if (r.kind == "expense") "-${r.amount}" else r.amount
+    val account = snapshot?.accounts?.firstOrNull { it.id == (accountId ?: r.accountId) }
+    val signed = r.signedAmount(accountId)
+    val category = if (r.isTransfer) {
+        // As the account's own list shows it: to the other account, or from it.
+        val incoming = accountId != null && accountId == r.transferAccountId
+        val other = snapshot?.accounts?.firstOrNull { it.id == if (incoming) r.accountId else r.transferAccountId }
+        stringResource(if (incoming) R.string.transfer_from else R.string.transfer_to, other?.name ?: "?")
+    } else {
+        snapshot?.categories?.firstOrNull { it.id == r.categoryId }?.fullName
+    }
     val rejected = item.rejectedReason != null
     ListRow(
         modifier = Modifier.clickable { showDialog = true },
@@ -244,11 +252,13 @@ fun LazyListScope.transactionItems(
     snapshot: Snapshot?,
     repository: Repository,
     showAccount: Boolean,
+    /** The account whose transactions these are, if any. */
+    accountId: String? = null,
     onOpen: (Transaction) -> Unit,
 ) {
     if (pending.isNotEmpty()) {
         item(key = "pending-header") { SectionHeader(stringResource(R.string.pending_header, pending.size)) }
-        items(pending, key = { "p-" + it.request.clientId }) { PendingRow(it, snapshot, repository) }
+        items(pending, key = { "p-" + it.request.clientId }) { PendingRow(it, snapshot, repository, accountId) }
     }
     transactions.groupBy { Format.localDate(it.instant) }.forEach { (day, dayItems) ->
         item(key = "d-$day") { SectionHeader(Format.dayHeader(day)) }

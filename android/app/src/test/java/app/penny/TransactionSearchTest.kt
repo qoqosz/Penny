@@ -77,4 +77,27 @@ class TransactionSearchTest {
         assertTrue(TransactionSearch("7,99").matches(request, snapshot))
         assertFalse(TransactionSearch("zabka").matches(request, snapshot))
     }
+
+    @Test fun `finds a pending transfer by either account`() {
+        val request = NewTransactionRequest(
+            clientId = "c", accountId = "a", date = "2026-10-03T10:00:00Z", kind = NewTransactionRequest.TRANSFER,
+            amount = "250", transferAccountId = "s",
+        )
+        assertTrue(TransactionSearch("savings").matches(request, snapshot))
+        assertTrue(TransactionSearch("osobiste 250").matches(request, snapshot))
+    }
+
+    @Test fun `a pending transfer is a minus where it leaves and a plus where it arrives`() {
+        val transfer = NewTransactionRequest(
+            clientId = "c", accountId = "a", date = "2026-10-03T10:00:00Z", kind = NewTransactionRequest.TRANSFER,
+            amount = "250", transferAccountId = "s",
+        )
+        assertTrue(transfer.involves("a") && transfer.involves("s") && !transfer.involves("x"))
+        assertEquals("-250", transfer.signedAmount("a"))
+        assertEquals("250", transfer.signedAmount("s"))
+        assertEquals("-250", transfer.signedAmount())
+        val income = transfer.copy(kind = "income", transferAccountId = null)
+        assertEquals("250", income.signedAmount("a"))
+        assertEquals("-250", income.copy(kind = "expense").signedAmount())
+    }
 }

@@ -62,7 +62,8 @@ fun AccountScreen(
     val prices by repository.prices.state.collectAsStateWithLifecycle()
     val list by transactions.state.collectAsStateWithLifecycle()
     val account = app.snapshot?.accounts?.firstOrNull { it.id == accountId }
-    val pending = app.pending.filter { it.request.accountId == accountId }
+    // Transfers show in both accounts.
+    val pending = app.pending.filter { it.request.involves(accountId) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var selected by rememberSelectedTransaction()
@@ -136,7 +137,7 @@ fun AccountScreen(
                                 cashOnly = account.hasInvestments && valuation?.knowsHoldings != true)
                         }
                     }
-                    transactionItems(list.items, shownPending, app.snapshot, repository, showAccount = false) { selected = it }
+                    transactionItems(list.items, shownPending, app.snapshot, repository, showAccount = false, accountId = accountId) { selected = it }
                     listFooter(list)
                 }
             }

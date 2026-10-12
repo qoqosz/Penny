@@ -25,6 +25,10 @@ Android (Penny) ⇄ Wi-Fi ⇄ penny-bridge (Mac) ⇄ local Money database ⇄ Mo
   the transaction to iCloud on its next sync, and from there it reaches your other devices.
 - New transactions copy their technical fields (`transactionType`, split type, flags) from the most recent similar
   transaction saved by Money, so they look the same as ones entered by hand.
+- **Transfers between your accounts:** like in Money, the category list also has your other accounts. Picking one
+  makes a transfer: with a minus it goes from the chosen account to that one, with a plus the other way. Money gets
+  two linked transactions, a minus in one account and a plus in the other, copied from the latest transfer you made
+  in Money.
 - The phone keeps an offline queue: transactions added away from home wait and are sent once you're back on Wi-Fi.
 - **Icons:** transactions show the payee's logo from Money, or else the category's icon (Money's built-in glyphs,
   taken from Money.app). The phone downloads them once and keeps them for offline use. Icons only go one way: nothing
@@ -162,8 +166,9 @@ Transactions added from the phone are written to the demo database.
 - Writing closes Money for a few seconds. When Money is frontmost (you're using it right now) or has an edit window
   open, the bridge defers the write and the phone retries later. This can be turned off with
   `deferWhileMoneyActive: false`.
-- Only expenses and income with a single category are supported. Transfers between accounts, split transactions
-  and editing existing transactions don't work yet.
+- Only expenses, income with a single category, and transfers are supported. Split transactions and editing
+  existing transactions don't work yet. Transfers work between accounts in the same currency, and only after
+  you've made at least one similar transfer in Money (one to or from an investment account counts separately).
 - Securities are valued at Yahoo Finance's prices (delayed during trading hours), not your broker's.
 - Converted amounts use the ECB's reference rates, not the rates your bank charged, so they're close but not exact.
 - Money's data format isn't documented. The bridge checks that the model matches the installed Money version and refuses

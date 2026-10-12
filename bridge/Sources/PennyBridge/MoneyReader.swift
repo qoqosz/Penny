@@ -174,6 +174,45 @@ struct TransactionTemplate {
     static let flagKeys = ["isScheduledTransaction", "readonly", "createdFromScheduledTransaction"]
 }
 
+/// How Money stores a transfer: one transaction in each account, whose single splits point at each other
+/// (`transferSplit` on one, `transferSplitInverse` on the other). Copied from the most recent plain transfer.
+struct TransferTemplate {
+    struct Side {
+        let transactionType: Int
+        let splitType: Int
+        let flags: [String: Any]
+        let hasCurrencyCode: Bool
+        let category: TransferCategory
+        /// This side's split holds `transferSplit` (the other split's `transferSplitInverse` then points back).
+        let holdsLink: Bool
+    }
+
+    /// The outgoing transaction it was learned from.
+    let transactionID: String
+    let outgoing: Side
+    let incoming: Side
+}
+
+/// The category on a transfer's split.
+enum TransferCategory: Equatable {
+    case none
+    /// The category Money keeps for the other account (`Category.account`), as its category list shows accounts.
+    case otherAccount
+    case ownAccount
+    /// Always this category.
+    case fixed(String)
+}
+
+/// Which side of a transfer is an investment account; Money may store those differently, so each shape is learned on its own.
+struct TransferShape: Hashable, CustomStringConvertible {
+    let outgoingInvestments: Bool
+    let incomingInvestments: Bool
+
+    var description: String {
+        "\(outgoingInvestments ? "investment" : "plain") → \(incomingInvestments ? "investment" : "plain")"
+    }
+}
+
 enum IDStyle: String {
     case upperUUID, lowerUUID, unknown
 
@@ -204,6 +243,9 @@ struct MoneySnapshot {
     let transactions: [TransactionDTO]
     let templatesByCategory: [String: TransactionTemplate]
     let templatesByKind: [Kind: TransactionTemplate]
+    let transferTemplates: [TransferShape: TransferTemplate]
+    /// The categories Money keeps for each account (by account ID), the most used in transfers first.
+    let accountCategories: [String: [String]]
     let idStyle: IDStyle
 
     func account(_ id: String) -> AccountDTO? { accounts.first { $0.id == id } }
@@ -307,6 +349,8 @@ enum MoneyReader {
         var splitTypeCounts: [Int: Int] = [:]
         var investmentAccounts: Set<NSManagedObjectID> = []
         var idSamples: [String] = []
+        var transferCandidates: [(date: Date, outgoing: NSManagedObjectID, incoming: NSManagedObjectID, template: TransferTemplate)] = []
+        var transferCategoryUses: [NSManagedObjectID: Int] = [:]
         var assets: [NSManagedObjectID: NSManagedObject] = [:]
         var shareChanges: [NSManagedObjectID: [NSManagedObjectID: [(date: Date, change: ShareChange)]]] = [:]
         var firstTrades: [NSManagedObjectID: Date] = [:]
@@ -358,7 +402,10 @@ enum MoneyReader {
                 originalTotal += raw
                 let category = split.object("category")
                 let transfer = transferAccount(of: split)
-                if transfer != nil { isTransfer = true }
+                if transfer != nil {
+                    isTransfer = true
+                    if let category { transferCategoryUses[category.objectID, default: 0] += 1 }
+                }
                 if let category, transfer == nil, amount != 0 {
                     var signs = categorySigns[category.objectID] ?? (0, 0)
                     if amount < 0 { signs.neg += 1 } else { signs.pos += 1 }
@@ -407,6 +454,37 @@ enum MoneyReader {
                     kindCandidates[kind, default: [:]][template.splitType] = (date, template)
                 }
             }
+            // Likewise plain transfers: one split on each side, in the accounts' shared currency. Learned from the outgoing side.
+            if kind == .transfer, total < 0, !foreign, splitObjects.count == 1, let split = splitObjects.first,
+               let linked = split.object("transferSplit") ?? split.object("transferSplitInverse"),
+               let other = linked.object("transaction"), let otherAccount = other.object("account"),
+               otherAccount.objectID != account.objectID, accountCurrency[otherAccount.objectID] == currency,
+               other.objects("transactionSplits").count == 1, other.string("currencyCode").map({ $0.isEmpty || $0 == currency }) ?? true,
+               (linked.decimal("amountInAccountCurrency") != 0 ? linked.decimal("amountInAccountCurrency") : linked.decimal("amount")) == -total,
+               [tx, other].allSatisfy({ $0.string("eBankTransactionID") == nil && $0.object("tradableAsset") == nil && !$0.bool("isScheduledTransaction") }) {
+                func side(_ t: NSManagedObject, _ s: NSManagedObject, own: NSManagedObject, counterpart: NSManagedObject,
+                          counterpartSplit: NSManagedObject) -> TransferTemplate.Side {
+                    var flags: [String: Any] = [:]
+                    for key in TransactionTemplate.flagKeys { flags[key] = t.value(forKey: key) ?? NSNull() }
+                    let category: TransferCategory
+                    if let c = s.object("category") {
+                        let linkedAccount = c.object("account")?.objectID
+                        category = linkedAccount == counterpart.objectID ? .otherAccount
+                            : linkedAccount == own.objectID ? .ownAccount : .fixed(c.publicID)
+                    } else {
+                        category = .none
+                    }
+                    return TransferTemplate.Side(
+                        transactionType: t.int("transactionType"), splitType: s.int("type"), flags: flags,
+                        hasCurrencyCode: t.string("currencyCode") != nil, category: category,
+                        holdsLink: s.object("transferSplit")?.objectID == counterpartSplit.objectID)
+                }
+                let template = TransferTemplate(
+                    transactionID: tx.publicID,
+                    outgoing: side(tx, split, own: account, counterpart: otherAccount, counterpartSplit: linked),
+                    incoming: side(other, linked, own: otherAccount, counterpart: account, counterpartSplit: split))
+                transferCandidates.append((date, account.objectID, otherAccount.objectID, template))
+            }
             if tx.object("tradableAsset") != nil { investmentAccounts.insert(account.objectID) }
         }
         transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
@@ -451,6 +529,17 @@ enum MoneyReader {
         var templatesByKind: [Kind: TransactionTemplate] = [:]
         for (kind, byType) in kindCandidates {
             if let regularSplitType, let t = byType[regularSplitType] { templatesByKind[kind] = t.template }
+        }
+
+        var transferTemplates: [TransferShape: (date: Date, template: TransferTemplate)] = [:]
+        for c in transferCandidates {
+            let shape = TransferShape(outgoingInvestments: investmentAccounts.contains(c.outgoing),
+                                      incomingInvestments: investmentAccounts.contains(c.incoming))
+            if c.date > (transferTemplates[shape]?.date ?? .distantPast) { transferTemplates[shape] = (c.date, c.template) }
+        }
+        var accountCategories: [String: [NSManagedObject]] = [:]
+        for c in categoryObjects {
+            if let account = c.object("account") { accountCategories[account.publicID, default: []].append(c) }
         }
 
         // Money's own system categories (investments, balance adjustment, transfers) use dedicated
@@ -507,7 +596,11 @@ enum MoneyReader {
             generation: generation, defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts,
             categories: categories, payees: payees, securities: securities, iconSources: iconSources, transactions: transactions,
             templatesByCategory: templatesByCategory.mapValues(\.template),
-            templatesByKind: templatesByKind, idStyle: IDStyle.detect(idSamples))
+            templatesByKind: templatesByKind, transferTemplates: transferTemplates.mapValues(\.template),
+            accountCategories: accountCategories.mapValues { list in
+                list.sorted { transferCategoryUses[$0.objectID, default: 0] > transferCategoryUses[$1.objectID, default: 0] }.map(\.publicID)
+            },
+            idStyle: IDStyle.detect(idSamples))
     }
 }
 

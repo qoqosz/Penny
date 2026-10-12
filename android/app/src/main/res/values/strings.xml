@@ -135,8 +135,11 @@
     <string name="add_title">New transaction</string>
     <string name="add_connect_first">Connect to the Mac first to download accounts and categories.</string>
     <string name="add_writes_disabled">Writing is turned off in the bridge configuration on the Mac.</string>
-    <string name="kind_expense">Expense</string>
-    <string name="kind_income">Income</string>
+    <string name="amount_expense">Expense. Remove the minus for income.</string>
+    <string name="amount_income">Income. Start with a minus for an expense.</string>
+    <string name="amount_toggle_sign">Switch between expense and income</string>
+    <string name="amount_transfer_out">Transfer to %1$s. Remove the minus to transfer the other way.</string>
+    <string name="amount_transfer_in">Transfer from %1$s. Start with a minus to transfer the other way.</string>
     <string name="field_amount">Amount</string>
     <string name="field_account">Account</string>
     <string name="field_category">Category</string>
@@ -158,7 +161,7 @@
     <string name="add_footer">The transaction goes to Money on the Mac the next time the phone connects, and from there to iCloud.</string>
     <string name="search">Search</string>
     <string name="categories_frequent">Most used</string>
-    <string name="categories_all">All</string>
+    <string name="categories_transfers">Transfer to or from an account</string>
     <string name="categories_no_match">No matching categories</string>
 
     <!-- Setup -->

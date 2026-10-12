@@ -95,6 +95,15 @@ enum Commands {
                 print("✗ No template for \(kind.rawValue)")
             }
         }
+        if snapshot.transferTemplates.isEmpty { print("✗ No template for transfers") }
+        for (shape, t) in snapshot.transferTemplates.sorted(by: { $0.key.description < $1.key.description }) {
+            func side(_ s: TransferTemplate.Side) -> String {
+                "transactionType=\(s.transactionType) split.type=\(s.splitType) category=\(s.category) "
+                    + "holdsLink=\(s.holdsLink) currencyCode=\(s.hasCurrencyCode)"
+            }
+            print("  Template transfer \(shape) (from \(t.transactionID)):\n    out: \(side(t.outgoing))\n    in:  \(side(t.incoming))")
+        }
+        print("  Accounts with a category in Money: \(snapshot.accountCategories.count)/\(snapshot.accounts.count)")
         print("\nAccounts:")
         for a in snapshot.accounts {
             print("  \(a.closed ? "(closed) " : "")\(a.name): \(a.balance) \(a.currency) — \(a.transactionCount) transactions, type \(a.type)")
@@ -150,6 +159,15 @@ enum Commands {
                         s.ZCATEGORYREPRESENTATIONSTRING catRepr, s.Z_FOK_TRANSACTION fok, s.ZUNIQUEIDENTIFIER splitUid
                  FROM ZTRANSACTION t LEFT JOIN ZTRANSACTIONSPLIT s ON s.ZTRANSACTION = t.Z_PK
                  ORDER BY t.ZLASTMODIFICATIONDATE DESC LIMIT 8
+                 """)
+        try show("Recent transfer splits",
+                 """
+                 SELECT s.Z_PK pk, t.ZACCOUNT account, t.ZTRANSACTIONTYPE type, s.ZTYPE splitType, s.ZAMOUNT amount,
+                        s.ZCATEGORY cat, c.ZACCOUNT catAccount, c.ZCATEGORYTYPE catType, s.ZTRANSFERSPLIT link,
+                        s.ZTRANSFERSPLITINVERSE inverse, t.ZCURRENCYCODE cur, t.ZPAYEENAME payee
+                 FROM ZTRANSACTIONSPLIT s JOIN ZTRANSACTION t ON s.ZTRANSACTION = t.Z_PK LEFT JOIN ZCATEGORY c ON s.ZCATEGORY = c.Z_PK
+                 WHERE s.ZTRANSFERSPLIT IS NOT NULL OR s.ZTRANSFERSPLITINVERSE IS NOT NULL
+                 ORDER BY t.ZDATE DESC LIMIT 6
                  """)
         if let sync = location.syncStoreURL {
             let sdb = try SQLiteDB(path: sync.path)
