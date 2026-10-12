@@ -135,6 +135,8 @@ struct SnapshotDTO: Codable {
     let generation: String
     let bridgeVersion: String
     let writesEnabled: Bool
+    /// Transfers between accounts can be added (older bridges leave this out and reject them).
+    let writesTransfers: Bool
     let defaultCurrency: String?
     /// The currencies set up in Money, the default one first. Transactions can be added in any of them
     /// (bridges without this field write in the account's currency only).
@@ -252,7 +254,7 @@ struct MoneySnapshot {
     func category(_ id: String) -> CategoryDTO? { categories.first { $0.id == id } }
 
     func dto(writesEnabled: Bool) -> SnapshotDTO {
-        SnapshotDTO(generation: generation, bridgeVersion: bridgeVersion, writesEnabled: writesEnabled,
+        SnapshotDTO(generation: generation, bridgeVersion: bridgeVersion, writesEnabled: writesEnabled, writesTransfers: true,
                     defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts, categories: categories, payees: payees,
                     securities: securities)
     }

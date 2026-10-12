@@ -163,6 +163,8 @@ data class Snapshot(
     val generation: String,
     val bridgeVersion: String,
     val writesEnabled: Boolean,
+    /** False from bridges that can't add transfers between accounts (they reject them). */
+    val writesTransfers: Boolean = false,
     val defaultCurrency: String? = null,
     /**
      * The currencies set up in Money, the default one first. Null from bridges that can only add transactions in the

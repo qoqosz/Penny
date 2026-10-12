@@ -69,6 +69,7 @@ enum SelfTest {
         let snap = try call("GET", "\(base)/snapshot", token: token)
         let accounts = snap.json["accounts"] as? [[String: Any]] ?? []
         check(accounts.count == 4, "4 accounts")
+        check(snap.json["writesTransfers"] as? Bool == true, "the snapshot says transfers can be written")
         check(snap.json["currencies"] as? [String] == ["PLN", "EUR"], "Money's currencies, the default first (\((snap.json["currencies"] as? [String])?.joined(separator: ", ") ?? "-"))")
         check(accounts.first?["folder"] as? String == "Archiwum" && accounts.first?["folderId"] is String,
               "account folder with an identifier")

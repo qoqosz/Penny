@@ -84,7 +84,8 @@ fun AddTransactionScreen(
     val app by repository.state.collectAsStateWithLifecycle()
     val hidden by hiddenAccounts.collectAsStateWithLifecycle()
     val form by vm.form.collectAsStateWithLifecycle()
-    val snapshot = app.snapshot
+    // Balances in the account picker include the queued transactions.
+    val snapshot = app.snapshotWithPending
     var pickCategory by rememberSaveable { mutableStateOf(false) }
     var pickDate by rememberSaveable { mutableStateOf(false) }
 
@@ -217,6 +218,7 @@ fun AddTransactionScreen(
                     !it.closed && it.id != form.accountId && it.currency == account?.currency &&
                         (!it.isHidden(hidden) || it.id == form.transferAccountId)
                 },
+                transfersUnsupported = !snapshot.writesTransfers,
                 icons = repository.icons,
                 onPick = { id -> vm.setCategory(id); pickCategory = false },
                 onPickAccount = { id -> vm.setTransfer(id); pickCategory = false },
@@ -387,6 +389,8 @@ private fun PayeeField(value: String, suggestions: List<Payee>, icons: IconStore
 private fun CategoryPicker(
     categories: List<Category>,
     accounts: List<Account>,
+    /** The bridge is too old for transfers: the accounts are replaced by a note. */
+    transfersUnsupported: Boolean,
     icons: IconStore,
     onPick: (String?) -> Unit,
     onPickAccount: (String) -> Unit,
@@ -435,7 +439,17 @@ private fun CategoryPicker(
                         }
                         items(ofKind, key = { it.id }) { CategoryRow(it, icons, onPick) }
                     }
-                    if (filteredAccounts.isNotEmpty()) {
+                    if (filteredAccounts.isNotEmpty() && transfersUnsupported) {
+                        item(key = "h-accounts") { SectionHeader(stringResource(R.string.categories_transfers)) }
+                        item(key = "transfers-old-bridge") {
+                            Text(
+                                stringResource(R.string.transfers_old_bridge),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                    } else if (filteredAccounts.isNotEmpty()) {
                         item(key = "h-accounts") { SectionHeader(stringResource(R.string.categories_transfers)) }
                         items(filteredAccounts, key = { "a-" + it.id }) { account ->
                             ListRow(

@@ -37,7 +37,10 @@ data class AppState(
     val dataVersion: Int = 0,
     /** The generation of the offline copy of transactions, once there is one (see [Repository.allTransactions]). */
     val offlineGeneration: String? = null,
-)
+) {
+    /** [snapshot] with the balances the queued transactions will make; account lists and totals show these. */
+    val snapshotWithPending: Snapshot? by lazy { snapshot?.withPending(pending) }
+}
 
 class Repository(
     private val settings: Settings,
@@ -125,7 +128,8 @@ class Repository(
             val snapshot = client.snapshot(connection)
             val changed = snapshot.generation != _state.value.snapshot?.generation
             cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
-            _state.update { it.copy(snapshot = snapshot, dataVersion = it.dataVersion + if (changed) 1 else 0) }
+            // Together, so balances never count a sent transaction twice (queued and in the snapshot) or not at all.
+            _state.update { it.copy(snapshot = snapshot, pending = queue.all(), dataVersion = it.dataVersion + if (changed) 1 else 0) }
             offline.update(connection, snapshot.generation)
             _state.update { it.copy(offlineGeneration = offline.current()?.generation) }
             // Icons can take a while the first time; the lists show them as they arrive.
@@ -254,23 +258,22 @@ class Repository(
     private suspend fun pushPending(connection: Connection) {
         for (item in queue.all()) {
             if (item.rejectedReason != null) continue
+            val id = item.request.clientId
             try {
                 client.create(connection, item.request)
-                queue.update { list -> list.filterNot { it.request.clientId == item.request.clientId } }
+                // It leaves the shown queue with the next snapshot, which has it (see refresh).
+                queue.update { list -> list.filterNot { it.request.clientId == id } }
             } catch (e: BridgeException) {
-                queue.update { list ->
-                    list.map {
-                        if (it.request.clientId != item.request.clientId) it
-                        else it.copy(
-                            attempts = it.attempts + 1,
-                            rejectedReason = if (e.isPermanent) e.message else null,
-                            lastError = e.message,
-                        )
-                    }
-                }
+                val failed = item.copy(
+                    attempts = item.attempts + 1,
+                    rejectedReason = if (e.isPermanent) e.message else null,
+                    lastError = e.message,
+                )
+                queue.update { list -> list.map { if (it.request.clientId == id) failed else it } }
+                // Only this one: the ones already sent stay shown until the snapshot has them.
+                _state.update { s -> s.copy(pending = s.pending.map { if (it.request.clientId == id) failed else it }) }
                 if (e.status == 401) throw e
             }
-            _state.update { it.copy(pending = queue.all()) }
         }
     }
 

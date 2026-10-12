@@ -61,7 +61,7 @@ fun AccountScreen(
     val valuation by repository.valuation.collectAsStateWithLifecycle()
     val prices by repository.prices.state.collectAsStateWithLifecycle()
     val list by transactions.state.collectAsStateWithLifecycle()
-    val account = app.snapshot?.accounts?.firstOrNull { it.id == accountId }
+    val account = app.snapshotWithPending?.accounts?.firstOrNull { it.id == accountId }
     // Transfers show in both accounts.
     val pending = app.pending.filter { it.request.involves(accountId) }
     val scope = rememberCoroutineScope()

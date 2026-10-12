@@ -154,7 +154,7 @@ fun HomeScreen(
         ) {
             when (tab) {
                 0 -> AccountsList(
-                    app.snapshot?.accounts, app.snapshot?.mainCurrency, rates.rates, valuation, hidden, app.status,
+                    app.snapshotWithPending?.accounts, app.snapshot?.mainCurrency, rates.rates, valuation, hidden, app.status,
                     onOpenAccount, onOpenHiddenAccounts,
                 )
                 1 -> RecentList(repository, recent)

@@ -45,6 +45,7 @@ class BridgeClientTest {
         val snapshot = client.snapshot(connection)
         assertEquals(BigDecimal("83.16"), snapshot.accounts.first().balanceValue)
         assertEquals(listOf("PLN", "EUR"), snapshot.currencies)
+        assertFalse("bridges without the field can't write transfers", snapshot.writesTransfers)
         assertEquals(setOf("PLN", "EUR"), snapshot.allCurrencies)
         assertEquals(setOf("PLN", "EUR", "USD"), snapshot.rateCurrencies)
         assertTrue(snapshot.accounts.first().isHidden(HiddenAccounts(folders = setOf("F1"))))

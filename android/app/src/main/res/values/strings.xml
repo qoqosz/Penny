@@ -168,6 +168,7 @@
     <string name="search">Search</string>
     <string name="categories_frequent">Most used</string>
     <string name="categories_transfers">Transfer to or from an account</string>
+    <string name="transfers_old_bridge">Update penny-bridge on the Mac to add transfers between accounts.</string>
     <string name="categories_no_match">No matching categories</string>
 
     <!-- Setup -->
