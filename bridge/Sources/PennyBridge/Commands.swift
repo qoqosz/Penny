@@ -228,7 +228,7 @@ enum Commands {
         Then restart the service:
           launchctl kickstart -k \(domain)/\(Paths.launchAgentLabel)
         and pair the phone:
-          \(target.path) pair
+          \(target.path.shellQuoted) pair
         """)
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
     }

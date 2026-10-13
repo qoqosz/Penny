@@ -94,6 +94,16 @@ struct BridgeError: Error, CustomStringConvertible {
     }
 }
 
+extension String {
+    /// The string as one shell word, for commands printed to copy and paste: as is when nothing needs escaping,
+    /// else in single quotes (a quote inside becomes '\'').
+    var shellQuoted: String {
+        let plain = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./:@%+=,")
+        if !isEmpty && unicodeScalars.allSatisfy(plain.contains) { return self }
+        return "'" + replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
 enum Paths {
     /// `PENNY_BRIDGE_HOME` lets the self-test run against a throwaway directory.
     static var support: URL {

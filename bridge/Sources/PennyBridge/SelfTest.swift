@@ -37,6 +37,17 @@ enum SelfTest {
             check(Language(acceptLanguage: header) == expected, "Accept-Language \(header.map { "“\($0)”" } ?? "none") → \(expected)")
         }
 
+        print("Shell quoting")
+        let quoting: [(String, String)] = [
+            ("/tmp/x/penny-bridge", "/tmp/x/penny-bridge"),
+            ("/Users/a/Library/Application Support/PennyBridge/bin/penny-bridge",
+             "'/Users/a/Library/Application Support/PennyBridge/bin/penny-bridge'"),
+            ("/tmp/it's", "'/tmp/it'\\''s'"), ("/tmp/$HOME", "'/tmp/$HOME'"), ("", "''"),
+        ]
+        for (path, expected) in quoting {
+            check(path.shellQuoted == expected, "\(path.isEmpty ? "empty" : path) → \(path.shellQuoted)")
+        }
+
         let macOnly = BridgeError.setup("Brak dostępu do /Users/x/Money.sqlite", en: "No access to /Users/x/Money.sqlite")
         check(!macOnly.clientMessage(in: .english).contains("/Users") && macOnly.clientMessage(in: .polish).contains("doctor"),
               "Mac-side error without details for the phone")

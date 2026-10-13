@@ -47,9 +47,9 @@ enum DemoData {
           \(tracked.filter { $0.0 == "Transaction" }.count) transactions, port \(config.port), service “\(config.serviceName!)”
 
         Run the bridge on this data:
-          PENNY_BRIDGE_HOME=\(home.path) penny-bridge serve
+          PENNY_BRIDGE_HOME=\(home.path.shellQuoted) penny-bridge serve
         and pair the phone:
-          PENNY_BRIDGE_HOME=\(home.path) penny-bridge pair
+          PENNY_BRIDGE_HOME=\(home.path.shellQuoted) penny-bridge pair
         """)
     }
 
