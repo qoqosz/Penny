@@ -46,7 +46,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.OffsetMapping
@@ -151,7 +150,7 @@ private fun ManualAddress(busy: Boolean, onConnect: (String, Int) -> Unit) {
 @Composable
 private fun ColumnScope.PairingCode(busy: Boolean, onPair: (String) -> Unit) {
     var code by rememberSaveable { mutableStateOf("") }
-    val codeStyle = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+    val codeStyle = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Monospace)
     val placeholder = stringResource(R.string.setup_code_placeholder)
     // Just wide enough for "123 456": the text, the field's 16 dp padding on each side and the cursor.
     val textWidth = rememberTextMeasurer().measure(placeholder, codeStyle).size.width
@@ -165,7 +164,9 @@ private fun ColumnScope.PairingCode(busy: Boolean, onPair: (String) -> Unit) {
         value = code,
         onValueChange = { code = it.filter(Char::isDigit).take(6) },
         label = { Text(stringResource(R.string.setup_code)) },
-        placeholder = { Text(placeholder, style = codeStyle, modifier = Modifier.fillMaxWidth()) },
+        placeholder = {
+            Text(placeholder, style = codeStyle, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+        },
         singleLine = true,
         textStyle = codeStyle,
         visualTransformation = PairingCodeTransformation,
