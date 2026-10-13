@@ -387,9 +387,13 @@ enum MoneyReader {
                 splitTo: split?.to, splitFrom: split?.from)
         }
 
+        // When a transaction was added: its splits' createdDate, else its last change. Orders transactions with the same date.
+        var addedDates: [String: Date] = [:]
         for tx in transactionObjects {
             guard let account = tx.object("account") else { continue }
             let date = tx.date("date") ?? .distantPast
+            addedDates[tx.publicID] = tx.objects("transactionSplits").compactMap { $0.date("createdDate") }.min()
+                ?? tx.date("lastModificationDate")
             let currency = accountCurrency[account.objectID] ?? ""
             var total: Decimal = 0
             var originalTotal: Decimal = 0
@@ -489,7 +493,10 @@ enum MoneyReader {
             }
             if tx.object("tradableAsset") != nil { investmentAccounts.insert(account.objectID) }
         }
-        transactions.sort { ($0.date, $0.id) > ($1.date, $1.id) }
+        // Newest first; of those with the same date (the phone gives other days than today noon), the last added first.
+        transactions.sort {
+            ($0.date, addedDates[$0.id] ?? .distantPast, $0.id) > ($1.date, addedDates[$1.id] ?? .distantPast, $1.id)
+        }
 
         func holdings(of account: NSManagedObject) -> [HoldingDTO] {
             (shareChanges[account.objectID] ?? [:]).compactMap { assetID, changes in

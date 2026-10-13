@@ -68,6 +68,7 @@ import app.penny.data.SyncStatus
 import app.penny.data.Transaction
 import app.penny.data.TransactionSearch
 import kotlinx.coroutines.launch
+import java.time.Instant
 
 @Composable
 fun StatusBanner(status: SyncStatus) {
@@ -330,12 +331,16 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifi
     )
 }
 
-/** The pending transactions a search finds (all of them without one). */
+/** The pending transactions a search finds (all of them without one), newest first like the bridge's list: by date, then the last added. */
 @Composable
 fun matchingPending(pending: List<PendingTransaction>, query: String, snapshot: Snapshot?): List<PendingTransaction> =
     remember(pending, query, snapshot) {
         val search = TransactionSearch(query)
-        if (search.isEmpty) pending else pending.filter { search.matches(it.request, snapshot) }
+        val found = if (search.isEmpty) pending else pending.filter { search.matches(it.request, snapshot) }
+        found.sortedWith(
+            compareByDescending<PendingTransaction> { runCatching { Instant.parse(it.request.date) }.getOrDefault(Instant.EPOCH) }
+                .thenByDescending { it.createdAt }
+        )
     }
 
 /** How many transactions a search found, above the results. */

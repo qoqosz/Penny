@@ -275,7 +275,8 @@ enum SelfTest {
 
         print("Batches")
         let batchBody: [String: Any] = ["transactions": [
-            ["clientId": "batch-1", "accountId": ids.account, "date": "2026-10-05T12:00:00Z", "kind": "expense",
+            // The same date as newTx, written earlier: this one was added last, so it comes first.
+            ["clientId": "batch-1", "accountId": ids.account, "date": "2026-10-01T12:00:00Z", "kind": "expense",
              "amount": "3", "categoryId": ids.food, "payeeName": "Żabka"],
             ["clientId": "batch-2", "accountId": ids.account, "date": "2026-10-05T13:00:00Z", "kind": "expense",
              "amount": "4", "payeeName": "żabka"],
@@ -298,6 +299,10 @@ enum SelfTest {
               "an invalid one is refused on its own, with the reason (\(badResult ?? [:]))")
         check(batchIDs[4] == createdID, "one sent before keeps its transaction")
         check(batchIDs[5] == batchIDs[0], "a repeated clientId in the batch is written once")
+        let sameDay = try call("GET", "\(base)/transactions?accountId=\(ids.account)&limit=100", token: token)
+            .json["items"] as? [[String: Any]] ?? []
+        let sameDayIDs = sameDay.filter { $0["date"] as? String == "2026-10-01T12:00:00Z" }.map { $0["id"] as? String }
+        check(sameDayIDs == [batchIDs[0], createdID], "of two transactions with the same date the last added comes first (\(sameDayIDs))")
         let afterBatch = try call("GET", "\(base)/snapshot", token: token).json
         let batchAccounts = afterBatch["accounts"] as? [[String: Any]] ?? []
         func batchBalance(_ id: String) -> String? { batchAccounts.first { $0["id"] as? String == id }?["balance"] as? String }
