@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,10 +41,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
@@ -141,8 +149,13 @@ private fun ManualAddress(busy: Boolean, onConnect: (String, Int) -> Unit) {
 }
 
 @Composable
-private fun PairingCode(busy: Boolean, onPair: (String) -> Unit) {
+private fun ColumnScope.PairingCode(busy: Boolean, onPair: (String) -> Unit) {
     var code by rememberSaveable { mutableStateOf("") }
+    val codeStyle = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+    val placeholder = stringResource(R.string.setup_code_placeholder)
+    // Just wide enough for "123 456": the text, the field's 16 dp padding on each side and the cursor.
+    val textWidth = rememberTextMeasurer().measure(placeholder, codeStyle).size.width
+    val fieldWidth = with(LocalDensity.current) { textWidth.toDp() } + 34.dp
     Text(stringResource(R.string.setup_code_title), style = MaterialTheme.typography.titleMedium)
     Text(
         stringResource(R.string.setup_code_instructions),
@@ -152,14 +165,28 @@ private fun PairingCode(busy: Boolean, onPair: (String) -> Unit) {
         value = code,
         onValueChange = { code = it.filter(Char::isDigit).take(6) },
         label = { Text(stringResource(R.string.setup_code)) },
+        placeholder = { Text(placeholder, style = codeStyle, modifier = Modifier.fillMaxWidth()) },
         singleLine = true,
-        textStyle = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Monospace),
+        textStyle = codeStyle,
+        visualTransformation = PairingCodeTransformation,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { if (code.length == 6) onPair(code) }),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.width(fieldWidth).align(Alignment.CenterHorizontally),
     )
     Button(onClick = { onPair(code) }, enabled = !busy && code.length == 6, modifier = Modifier.fillMaxWidth()) {
         if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text(stringResource(R.string.setup_pair))
+    }
+}
+
+/** Shows the code as the Mac prints it, "123 456". */
+private object PairingCodeTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        if (text.length <= 3) return TransformedText(text, OffsetMapping.Identity)
+        val spaced = AnnotatedString(text.text.take(3) + " " + text.text.drop(3))
+        return TransformedText(spaced, object : OffsetMapping {
+            override fun originalToTransformed(offset: Int) = if (offset <= 3) offset else offset + 1
+            override fun transformedToOriginal(offset: Int) = if (offset <= 3) offset else offset - 1
+        })
     }
 }
 

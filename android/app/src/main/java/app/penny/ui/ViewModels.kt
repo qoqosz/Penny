@@ -317,7 +317,7 @@ class AddTransactionViewModel(
         val signs = normalized.filter { it == '+' || it == '-' }
         val oldSign = form.amount.firstOrNull()?.takeIf { it == '+' || it == '-' }
         val sign = signs.firstOrNull { it != oldSign } ?: oldSign?.takeIf { it in signs }
-        val amount = sign?.toString().orEmpty() + normalized.filter { it.isDigit() || it == ',' || it == '.' }
+        val amount = sign?.toString().orEmpty() + Format.withLeadingZero(normalized.filter { it.isDigit() || it == ',' || it == '.' })
         form.copy(
             amount = amount,
             // Clearing the field lets the next category pick set the sign again.

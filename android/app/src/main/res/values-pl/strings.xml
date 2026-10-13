@@ -189,7 +189,7 @@
     <string name="setup_port">Port</string>
     <string name="setup_connect">Połącz</string>
     <string name="setup_code_title">Kod parowania</string>
-    <string name="setup_code_instructions">Na Macu uruchom w Terminalu:  penny-bridge pair\ni wpisz pokazany 6-cyfrowy kod.</string>
+    <string name="setup_code_instructions">Na Macu uruchom w Terminalu:  penny-bridge pair\ni wpisz pokazany kod (6 cyfr, np. 123 456).</string>
     <string name="setup_code">Kod</string>
     <string name="setup_pair">Sparuj</string>
 

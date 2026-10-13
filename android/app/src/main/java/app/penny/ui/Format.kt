@@ -121,6 +121,13 @@ object Format {
         return normalized.toBigDecimalOrNull()?.takeIf { it.signum() > 0 }
     }
 
+    /** An amount being typed, without its sign: a leading separator (".87", ",87") gets a zero, with the language's separator. */
+    fun withLeadingZero(
+        digits: String,
+        separator: Char = java.text.DecimalFormatSymbols.getInstance(Locale.getDefault()).decimalSeparator,
+    ): String =
+        if (digits.startsWith('.') || digits.startsWith(',')) "0$separator${digits.drop(1)}" else digits
+
     /** The currency's name in the app's language, e.g. "Euro", or the code when Java doesn't know it. */
     fun currencyName(code: String): String =
         runCatching { Currency.getInstance(code).getDisplayName(Locale.getDefault()) }.getOrDefault(code)

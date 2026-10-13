@@ -183,8 +183,9 @@
     <string name="setup_port">Port</string>
     <string name="setup_connect">Connect</string>
     <string name="setup_code_title">Pairing code</string>
-    <string name="setup_code_instructions">On the Mac, run in Terminal:  penny-bridge pair\nand enter the 6-digit code it shows.</string>
+    <string name="setup_code_instructions">On the Mac, run in Terminal:  penny-bridge pair\nand enter the code it shows (6 digits, e.g. 123 456).</string>
     <string name="setup_code">Code</string>
+    <string name="setup_code_placeholder" translatable="false">000 000</string>
     <string name="setup_pair">Pair</string>
 
     <!-- Settings -->

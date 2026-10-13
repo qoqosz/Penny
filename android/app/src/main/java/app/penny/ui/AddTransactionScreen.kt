@@ -54,9 +54,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -151,9 +153,13 @@ fun AddTransactionScreen(
             else snapshot.currencies?.let { (listOf(accountCurrency) + it).filter(String::isNotEmpty).distinct() }.orEmpty()
             val currency = form.currency ?: accountCurrency
             val amountColor = if (expense) AmountColors.expenseEmphasis else AmountColors.income
+            var amountField by remember { mutableStateOf(TextFieldValue(form.amount, TextRange(form.amount.length))) }
             OutlinedTextField(
-                value = form.amount,
-                onValueChange = vm::setAmount,
+                value = amountField.synced(form.amount),
+                onValueChange = {
+                    amountField = it
+                    vm.setAmount(it.text)
+                },
                 label = { Text(stringResource(R.string.field_amount)) },
                 leadingIcon = {
                     val toggleSign = stringResource(R.string.amount_toggle_sign)
@@ -351,14 +357,19 @@ private fun AccountPicker(accounts: List<Account>, selectedId: String?, onSelect
 @Composable
 private fun PayeeField(value: String, suggestions: List<Payee>, icons: IconStore, onChange: (String, Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     val matches = remember(value, suggestions) {
         if (value.length < 2) emptyList()
         else suggestions.filter { it.name.contains(value, ignoreCase = true) && !it.name.equals(value, ignoreCase = true) }.take(6)
     }
     ExposedDropdownMenuBox(expanded = focused && matches.isNotEmpty(), onExpandedChange = {}) {
         OutlinedTextField(
-            value = value,
-            onValueChange = { onChange(it, false) },
+            // A picked suggestion puts the cursor at the end of the name.
+            value = if (field.text == value) field else TextFieldValue(value, TextRange(value.length)),
+            onValueChange = {
+                field = it
+                onChange(it.text, false)
+            },
             label = { Text(stringResource(R.string.field_payee)) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
@@ -479,4 +490,14 @@ private fun CategoryRow(category: Category, icons: IconStore, onPick: (String?) 
         subtitle = parent,
         modifier = Modifier.clickable { onPick(category.id) },
     )
+}
+
+/**
+ * This field's value with [text] as the view model keeps it, which may differ from what was typed (a zero added
+ * before ",87", a sign put in front). The cursor moves by the number of characters added or removed.
+ */
+private fun TextFieldValue.synced(text: String): TextFieldValue {
+    if (text == this.text) return this
+    val cursor = (selection.end + text.length - this.text.length).coerceIn(0, text.length)
+    return TextFieldValue(text, TextRange(cursor))
 }
