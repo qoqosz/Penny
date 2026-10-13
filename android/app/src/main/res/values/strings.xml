@@ -121,6 +121,7 @@
         <item quantity="one">%d transaction waiting to sync</item>
         <item quantity="other">%d transactions waiting to sync</item>
     </plurals>
+    <string name="pending_not_sent">Not sent: %s</string>
     <string name="action_sync_now">Sync now</string>
 
     <!-- Transaction details -->

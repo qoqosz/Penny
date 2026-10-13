@@ -91,7 +91,9 @@ final class TransactionWriter {
             syncStore: syncStore, knownTransactionIDs: snapshot.transactions.prefix(200).map(\.id))
 
         if let app, config.deferWhileMoneyActive, app.isFrontmost {
-            throw BridgeError.busy("Money jest właśnie używany na Macu. Transakcja zostanie wysłana później.", en: "Money is in use on the Mac right now. The transaction will be sent later.")
+            throw BridgeError.busy(
+                "Money jest otwarty na pierwszym planie na Macu, więc zapis czeka. Przełącz się na Macu na inną aplikację.",
+                en: "Money is open in front on the Mac, so the write waits. Switch to another app on the Mac.")
         }
         let wasRunning = try app?.quit(timeout: config.quitTimeoutSeconds) ?? false
         defer {

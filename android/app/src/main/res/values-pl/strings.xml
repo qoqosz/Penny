@@ -127,6 +127,7 @@
         <item quantity="many">%d transakcji czeka na synchronizację</item>
         <item quantity="other">%d transakcji czeka na synchronizację</item>
     </plurals>
+    <string name="pending_not_sent">Nie wysłano: %s</string>
     <string name="action_sync_now">Synchronizuj teraz</string>
 
     <!-- Transaction details -->

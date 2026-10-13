@@ -123,8 +123,11 @@ fun HomeScreen(
                 )
                 StatusBanner(app.status)
                 if (syncMode == SyncMode.MANUAL) {
+                    val waiting = app.pending.filter { it.rejectedReason == null }
                     PendingSyncBanner(
-                        count = app.pending.count { it.rejectedReason == null },
+                        count = waiting.size,
+                        // A batch the Mac refused (Money in use, …) gives every item the same error.
+                        lastError = waiting.firstNotNullOfOrNull { it.lastError },
                         syncing = syncing,
                         onSync = { scope.launch { repository.syncNow() } },
                     )
@@ -164,19 +167,23 @@ fun HomeScreen(
     }
 }
 
-/** In manual sync mode: how many added transactions still wait for the Mac, and a button to send them. */
+/**
+ * In manual sync mode: how many added transactions still wait for the Mac, why the last attempt didn't send them,
+ * and a button to send them.
+ */
 @Composable
-private fun PendingSyncBanner(count: Int, syncing: Boolean, onSync: () -> Unit) {
+private fun PendingSyncBanner(count: Int, lastError: String?, syncing: Boolean, onSync: () -> Unit) {
     if (count == 0) return
     Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Schedule, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(12.dp))
-            Text(
-                pluralStringResource(R.plurals.pending_sync_count, count, count),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(pluralStringResource(R.plurals.pending_sync_count, count, count), style = MaterialTheme.typography.bodyMedium)
+                if (lastError != null && !syncing) {
+                    Text(stringResource(R.string.pending_not_sent, lastError), style = MaterialTheme.typography.bodySmall)
+                }
+            }
             TextButton(onClick = onSync, enabled = !syncing) { Text(stringResource(R.string.action_sync_now)) }
         }
     }
