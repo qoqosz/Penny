@@ -273,15 +273,53 @@ enum SelfTest {
         check(toBroker.status == 422 && toBroker.errorMessage?.contains("investment") == true,
               "no template for a transfer into an investment account (\(toBroker.errorMessage ?? "-"))")
 
+        print("Batches")
+        let batchBody: [String: Any] = ["transactions": [
+            ["clientId": "batch-1", "accountId": ids.account, "date": "2026-10-05T12:00:00Z", "kind": "expense",
+             "amount": "3", "categoryId": ids.food, "payeeName": "Żabka"],
+            ["clientId": "batch-2", "accountId": ids.account, "date": "2026-10-05T13:00:00Z", "kind": "expense",
+             "amount": "4", "payeeName": "żabka"],
+            ["clientId": "batch-3", "accountId": ids.account, "date": "2026-10-05T14:00:00Z", "kind": "transfer",
+             "amount": "1", "transferAccountId": ids.savings],
+            ["clientId": "batch-bad", "accountId": ids.account, "date": "2026-10-05T14:00:00Z", "kind": "expense", "amount": "-1"],
+            newTx,
+            ["clientId": "batch-1", "accountId": ids.account, "date": "2026-10-05T12:00:00Z", "kind": "expense", "amount": "3"],
+        ]]
+        let batch = try call("POST", "\(base)/transactions/batch", token: token, language: "en-US", body: batchBody)
+        let results = batch.json["results"] as? [[String: Any]] ?? []
+        check(batch.status == 200 && results.count == 6, "POST /transactions/batch → a result per transaction (\(batch.status) \(batch.text))")
+        let batchIDs = results.map { $0["transactionId"] as? String }
+        check(results.map { $0["clientId"] as? String } == ["batch-1", "batch-2", "batch-3", "batch-bad", clientId, "batch-1"],
+              "results in the request's order")
+        check(batchIDs[0] != nil && batchIDs[1] != nil && batchIDs[2] != nil && Set(batchIDs.prefix(3)).count == 3,
+              "valid ones written, each its own transaction")
+        let badResult = results[3]["error"] as? [String: Any]
+        check(batchIDs[3] == nil && badResult?["status"] as? Int == 422 && badResult?["message"] as? String == "Invalid amount: -1",
+              "an invalid one is refused on its own, with the reason (\(badResult ?? [:]))")
+        check(batchIDs[4] == createdID, "one sent before keeps its transaction")
+        check(batchIDs[5] == batchIDs[0], "a repeated clientId in the batch is written once")
+        let afterBatch = try call("GET", "\(base)/snapshot", token: token).json
+        let batchAccounts = afterBatch["accounts"] as? [[String: Any]] ?? []
+        func batchBalance(_ id: String) -> String? { batchAccounts.first { $0["id"] as? String == id }?["balance"] as? String }
+        check(batchBalance(ids.account) == "7.66" && batchBalance(ids.savings) == "76",
+              "balances 15.66 - 3 - 4 - 1 = 7.66 and 75 + 1 = 76 (got \(batchBalance(ids.account) ?? "-"), \(batchBalance(ids.savings) ?? "-"))")
+        let zabka = (afterBatch["payees"] as? [[String: Any]] ?? []).filter { ($0["name"] as? String)?.lowercased() == "żabka" }
+        check(zabka.count == 1, "a new payee used twice in the batch is added once")
+        let allBad = try call("POST", "\(base)/transactions/batch", token: token, body: ["transactions": [
+            ["clientId": UUID().uuidString, "accountId": ids.account, "date": "2026-10-05T14:00:00Z", "kind": "expense", "amount": "0"],
+        ]])
+        check(allBad.status == 200 && ((allBad.json["results"] as? [[String: Any]])?.first?["error"] as? [String: Any])?["status"] as? Int == 422,
+              "a batch with nothing valid writes nothing")
+
         print("SyncKit")
         let sync = try SQLiteDB(path: location.syncStoreURL!.path)
         let tracked = try sync.query("SELECT ZIDENTIFIER i, ZENTITYTYPE t, ZSTATE s FROM ZQSSYNCEDENTITY WHERE ZSTATE = 0")
-        check(tracked.count == 11, "11 new rows to upload (5× transaction, 5× split, payee) — got \(tracked.count)")
+        check(tracked.count == 20, "20 new rows to upload (9× transaction, 9× split, 2× payee) — got \(tracked.count)")
         check(tracked.contains { $0["i"] as? String == "Transaction.\(createdID)" }, "identifier “Transaction.<uuid>”")
         check(Set(tracked.compactMap { $0["t"] as? String }) == ["Transaction", "TransactionSplit", "Payee"], "entity types")
 
         let backups = (try? FileManager.default.contentsOfDirectory(atPath: Paths.backups.path)) ?? []
-        check(backups.count == 4, "backups before every write")
+        check(backups.count == 5, "a backup before every write, one per batch")
 
         print(failures == 0 ? "\nALL OK" : "\nFAILURES: \(failures)")
         if failures > 0 { exit(1) }

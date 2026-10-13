@@ -281,6 +281,20 @@ data class ApiErrorBody(val error: ApiErrorInner)
 @Serializable
 data class ApiErrorInner(val code: String, val message: String)
 
+/** `POST transactions/batch`: the queue in one write, so Money on the Mac is quit and relaunched once. */
+@Serializable
+data class NewTransactionBatch(val transactions: List<NewTransactionRequest>)
+
+@Serializable
+data class BatchResults(val results: List<BatchResult>)
+
+/** One transaction of a batch: written ([transactionId]) or refused ([error], with the status it would have had alone). */
+@Serializable
+data class BatchResult(val clientId: String, val transactionId: String? = null, val error: BatchError? = null)
+
+@Serializable
+data class BatchError(val status: Int, val code: String, val message: String)
+
 enum class Kind(val api: String) {
     EXPENSE("expense"), INCOME("income");
 }

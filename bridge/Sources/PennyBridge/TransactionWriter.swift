@@ -46,17 +46,47 @@ final class TransactionWriter {
     }
 
     func create(_ request: NewTransactionRequest, snapshot: MoneySnapshot) throws -> String {
+        try create([request], snapshot: snapshot)[0].get()
+    }
+
+    /// Adds the transactions in one go: Money is quit and relaunched once, and one backup covers them all.
+    /// Returns each request's outcome in order: the new transaction's ID, or why that one was refused. Problems that
+    /// concern the whole write (Money busy, setup, a failed save) are thrown, and then nothing is written.
+    func create(_ requests: [NewTransactionRequest], snapshot: MoneySnapshot) throws -> [Result<String, BridgeError>] {
         var created = JSONFile.read([String: CreatedRecord].self, from: Paths.created) ?? [:]
-        if let existing = created[request.clientId] {
-            Log.info("Transaction \(request.clientId) already saved as \(existing.transactionId)")
-            return existing.transactionId
+        var results = [Result<String, BridgeError>?](repeating: nil, count: requests.count)
+        var firstIndex: [String: Int] = [:]
+        var todo: [Int] = []
+        for (i, request) in requests.enumerated() {
+            if let existing = created[request.clientId] {
+                Log.info("Transaction \(request.clientId) already saved as \(existing.transactionId)")
+                results[i] = .success(existing.transactionId)
+            } else if firstIndex[request.clientId] == nil {
+                firstIndex[request.clientId] = i
+                todo.append(i)
+            }
         }
+        // The same clientId twice in one batch: the later ones share the first one's outcome.
+        func finish() -> [Result<String, BridgeError>] {
+            requests.indices.map { results[$0] ?? results[firstIndex[requests[$0].clientId]!]! }
+        }
+        if todo.isEmpty { return finish() }
+
         guard config.writesEnabled else { throw BridgeError.invalid("Zapis jest wyłączony w konfiguracji mostu.", en: "Writing is turned off in the bridge configuration.") }
         guard let syncStore = location.syncStoreURL else {
             throw BridgeError.setup("Nie znaleziono bazy synchronizacji Money (SyncKit). Czy synchronizacja z iCloud jest włączona?", en: "Money's sync database (SyncKit) not found. Is iCloud sync turned on?")
         }
 
-        let plan = try validate(request, snapshot: snapshot)
+        var plans: [(index: Int, plan: Plan)] = []
+        for i in todo {
+            do {
+                plans.append((i, try validate(requests[i], snapshot: snapshot)))
+            } catch let error as BridgeError {
+                Log.info("Transaction \(requests[i].clientId) rejected: \(error.englishMessage)")
+                results[i] = .failure(error)
+            }
+        }
+        if plans.isEmpty { return finish() }
         let conventions = try SyncConventions.learn(
             syncStore: syncStore, knownTransactionIDs: snapshot.transactions.prefix(200).map(\.id))
 
@@ -74,26 +104,29 @@ final class TransactionWriter {
 
         let stores = [location.storeURL, syncStore]
         let backup = try backups.create(stores: stores)
-        let transactionID: String
+        let transactionIDs: [String]
         do {
-            let inserted = try insert(plan, snapshot: snapshot)
+            let inserted = try insert(plans.map(\.plan), snapshot: snapshot)
             try SyncTracker.track(inserted.objects, model: syncModel, syncStore: syncStore,
                                   conventions: conventions, newState: config.syncNewState)
-            transactionID = inserted.transactionID
+            transactionIDs = inserted.transactionIDs
         } catch {
             Log.error("Write failed, restoring the backup: \(error)")
             try? backups.restore(backup, stores: stores)
             throw error
         }
 
-        created[request.clientId] = CreatedRecord(transactionId: transactionID, created: Date())
+        for ((i, plan), transactionID) in zip(plans, transactionIDs) {
+            results[i] = .success(transactionID)
+            created[plan.request.clientId] = CreatedRecord(transactionId: transactionID, created: Date())
+            let foreign = plan.currency == plan.entries[0].account.currency ? "" : " \(plan.currency) at \(plan.rate.plainString)"
+            let accounts = plan.entries.map { "“\($0.account.name)”" }.joined(separator: " → ")
+            Log.info("Added \(plan.entries.count > 1 ? "transfer" : "transaction") \(transactionID): "
+                + "\(plan.entries[0].signedAmount.plainString)\(foreign) in \(accounts)")
+        }
         let cutoff = Date().addingTimeInterval(-180 * 86400)
         try? JSONFile.write(created.filter { $0.value.created > cutoff }, to: Paths.created)
-        let foreign = plan.currency == plan.entries[0].account.currency ? "" : " \(plan.currency) at \(plan.rate.plainString)"
-        let accounts = plan.entries.map { "“\($0.account.name)”" }.joined(separator: " → ")
-        Log.info("Added \(plan.entries.count > 1 ? "transfer" : "transaction") \(transactionID): "
-            + "\(plan.entries[0].signedAmount.plainString)\(foreign) in \(accounts)")
-        return transactionID
+        return finish()
     }
 
     /// One transaction to insert: a single split in one account.
@@ -237,7 +270,8 @@ final class TransactionWriter {
             currency: from.currency, rate: 1, payeeName: payeeName, note: note)
     }
 
-    private func insert(_ plan: Plan, snapshot: MoneySnapshot) throws -> (transactionID: String, objects: [InsertedObject]) {
+    /// Inserts every plan in one save. Returns each plan's (first) transaction ID, in order.
+    private func insert(_ plans: [Plan], snapshot: MoneySnapshot) throws -> (transactionIDs: [String], objects: [InsertedObject]) {
         let store = try CoreDataStore(model: model, url: location.storeURL, readOnly: false)
         defer { store.close() }
         return try store.perform { ctx in
@@ -254,70 +288,77 @@ final class TransactionWriter {
 
             let now = Date()
             var newObjects: [NSManagedObject] = []
+            // Payees created earlier in this batch, by lowercased name, so a new name is added once.
+            var newPayees: [String: NSManagedObject] = [:]
+            var firsts: [NSManagedObject] = []
 
-            var payee: NSManagedObject?
-            if let name = plan.payeeName {
-                payee = try ctx.fetchFirst("Payee", NSPredicate(format: "name ==[c] %@", name))
-                if payee == nil {
-                    let p = NSEntityDescription.insertNewObject(forEntityName: "Payee", into: ctx)
-                    p.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
-                    p.setValue(name, forKey: "name")
-                    p.setValue(try lookup("Account", plan.entries[0].account.id).value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
-                    newObjects.append(p)
-                    payee = p
+            for plan in plans {
+                var payee: NSManagedObject?
+                if let name = plan.payeeName {
+                    payee = try newPayees[name.lowercased()] ?? ctx.fetchFirst("Payee", NSPredicate(format: "name ==[c] %@", name))
+                    if payee == nil {
+                        let p = NSEntityDescription.insertNewObject(forEntityName: "Payee", into: ctx)
+                        p.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
+                        p.setValue(name, forKey: "name")
+                        p.setValue(try lookup("Account", plan.entries[0].account.id).value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
+                        newObjects.append(p)
+                        newPayees[name.lowercased()] = p
+                        payee = p
+                    }
                 }
-            }
 
-            var inserted: [(tx: NSManagedObject, split: NSManagedObject)] = []
-            for entry in plan.entries {
-                let account = try lookup("Account", entry.account.id)
-                let category = try entry.categoryID.map { try lookup("Category", $0) }
+                var inserted: [(tx: NSManagedObject, split: NSManagedObject)] = []
+                for entry in plan.entries {
+                    let account = try lookup("Account", entry.account.id)
+                    let category = try entry.categoryID.map { try lookup("Category", $0) }
 
-                let tx = NSEntityDescription.insertNewObject(forEntityName: "Transaction", into: ctx)
-                for (key, value) in entry.flags { tx.setValue(value is NSNull ? nil : value, forKey: key) }
-                tx.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
-                tx.setValue(plan.request.date, forKey: "date")
-                tx.setValue(now, forKey: "lastModificationDate")
-                tx.setValue(NSNumber(value: Int16(entry.transactionType)), forKey: "transactionType")
-                tx.setValue(NSNumber(value: Int16(0)), forKey: "reconciledStatus")
-                // Money leaves the code out on some older transactions, but always sets it for another currency.
-                if entry.hasCurrencyCode || plan.currency != entry.account.currency {
-                    tx.setValue(plan.currency, forKey: "currencyCode")
+                    let tx = NSEntityDescription.insertNewObject(forEntityName: "Transaction", into: ctx)
+                    for (key, value) in entry.flags { tx.setValue(value is NSNull ? nil : value, forKey: key) }
+                    tx.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
+                    tx.setValue(plan.request.date, forKey: "date")
+                    tx.setValue(now, forKey: "lastModificationDate")
+                    tx.setValue(NSNumber(value: Int16(entry.transactionType)), forKey: "transactionType")
+                    tx.setValue(NSNumber(value: Int16(0)), forKey: "reconciledStatus")
+                    // Money leaves the code out on some older transactions, but always sets it for another currency.
+                    if entry.hasCurrencyCode || plan.currency != entry.account.currency {
+                        tx.setValue(plan.currency, forKey: "currencyCode")
+                    }
+                    tx.setValue(NSDecimalNumber(decimal: plan.rate), forKey: "currencyRateToAccountCurrency")
+                    tx.setValue(plan.payeeName, forKey: "payeeName")
+                    tx.setValue(payee, forKey: "payee")
+                    tx.setValue(plan.note, forKey: "note")
+                    tx.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
+                    tx.setValue(account, forKey: "account")
+                    newObjects.append(tx)
+
+                    let split = NSEntityDescription.insertNewObject(forEntityName: "TransactionSplit", into: ctx)
+                    split.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
+                    // Like Money: the amount in the transaction's currency, and its exact (unrounded) value in the account's.
+                    split.setValue(NSDecimalNumber(decimal: entry.signedAmount), forKey: "amount")
+                    split.setValue(NSDecimalNumber(decimal: entry.signedAmount * plan.rate), forKey: "amountInAccountCurrency")
+                    split.setValue(NSNumber(value: Int64(entry.splitType)), forKey: "type")
+                    split.setValue(now, forKey: "createdDate")
+                    // categoryRepresentationString holds the category name from bank imports; manual entries leave it empty.
+                    split.setValue(category, forKey: "category")
+                    split.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
+                    split.setValue(tx, forKey: "transaction")
+                    newObjects.append(split)
+                    inserted.append((tx, split))
                 }
-                tx.setValue(NSDecimalNumber(decimal: plan.rate), forKey: "currencyRateToAccountCurrency")
-                tx.setValue(plan.payeeName, forKey: "payeeName")
-                tx.setValue(payee, forKey: "payee")
-                tx.setValue(plan.note, forKey: "note")
-                tx.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
-                tx.setValue(account, forKey: "account")
-                newObjects.append(tx)
-
-                let split = NSEntityDescription.insertNewObject(forEntityName: "TransactionSplit", into: ctx)
-                split.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
-                // Like Money: the amount in the transaction's currency, and its exact (unrounded) value in the account's.
-                split.setValue(NSDecimalNumber(decimal: entry.signedAmount), forKey: "amount")
-                split.setValue(NSDecimalNumber(decimal: entry.signedAmount * plan.rate), forKey: "amountInAccountCurrency")
-                split.setValue(NSNumber(value: Int64(entry.splitType)), forKey: "type")
-                split.setValue(now, forKey: "createdDate")
-                // categoryRepresentationString holds the category name from bank imports; manual entries leave it empty.
-                split.setValue(category, forKey: "category")
-                split.setValue(account.value(forKey: "ckOwnerName"), forKey: "ckOwnerName")
-                split.setValue(tx, forKey: "transaction")
-                newObjects.append(split)
-                inserted.append((tx, split))
-            }
-            // A transfer's splits point at each other; setting one side also sets the inverse on the other.
-            if inserted.count == 2 {
-                let (outgoing, incoming) = (inserted[0].split, inserted[1].split)
-                if plan.entries[0].holdsLink { outgoing.setValue(incoming, forKey: "transferSplit") }
-                if plan.entries[1].holdsLink { incoming.setValue(outgoing, forKey: "transferSplit") }
+                // A transfer's splits point at each other; setting one side also sets the inverse on the other.
+                if inserted.count == 2 {
+                    let (outgoing, incoming) = (inserted[0].split, inserted[1].split)
+                    if plan.entries[0].holdsLink { outgoing.setValue(incoming, forKey: "transferSplit") }
+                    if plan.entries[1].holdsLink { incoming.setValue(outgoing, forKey: "transferSplit") }
+                }
+                firsts.append(inserted[0].tx)
             }
 
             try ctx.save()
             let objects = newObjects.map {
                 InsertedObject(entity: $0.entityName, uniqueID: $0.string("uniqueIdentifier") ?? "")
             }
-            return (inserted[0].tx.publicID, objects)
+            return (firsts.map(\.publicID), objects)
         }
     }
 }

@@ -255,26 +255,57 @@ class Repository(
     /** Every transaction, newest first, from the offline copy (empty until it's downloaded). */
     suspend fun allTransactions(): List<Transaction> = offline.current()?.items.orEmpty()
 
+    /** Sends the queue in batches, so the Mac quits and relaunches Money once rather than for every transaction. */
     private suspend fun pushPending(connection: Connection) {
-        for (item in queue.all()) {
-            if (item.rejectedReason != null) continue
-            val id = item.request.clientId
+        val waiting = queue.all().filter { it.rejectedReason == null }
+        for (chunk in waiting.chunked(BATCH_SIZE)) {
+            val results = try {
+                client.createBatch(connection, chunk.map { it.request }).results
+            } catch (e: BridgeException) {
+                if (e.status == 404) return pushOneByOne(connection, chunk)
+                // Nothing was written (Money in use, a problem on the Mac): every item gets the error.
+                chunk.forEach { record(it, e) }
+                if (e.status == 401) throw e
+                continue
+            }
+            val byId = results.associateBy { it.clientId }
+            for (item in chunk) {
+                // Missing from the answer: left as it was, for the next sync.
+                val result = byId[item.request.clientId] ?: continue
+                record(item, result.error?.let { BridgeException(it.status, it.code, it.message) })
+            }
+        }
+    }
+
+    /** For bridges without `transactions/batch`. */
+    private suspend fun pushOneByOne(connection: Connection, items: List<PendingTransaction>) {
+        for (item in items) {
             try {
                 client.create(connection, item.request)
-                // It leaves the shown queue with the next snapshot, which has it (see refresh).
-                queue.update { list -> list.filterNot { it.request.clientId == id } }
+                record(item, null)
             } catch (e: BridgeException) {
-                val failed = item.copy(
-                    attempts = item.attempts + 1,
-                    rejectedReason = if (e.isPermanent) e.message else null,
-                    lastError = e.message,
-                )
-                queue.update { list -> list.map { if (it.request.clientId == id) failed else it } }
-                // Only this one: the ones already sent stay shown until the snapshot has them.
-                _state.update { s -> s.copy(pending = s.pending.map { if (it.request.clientId == id) failed else it }) }
+                record(item, e)
                 if (e.status == 401) throw e
             }
         }
+    }
+
+    /** Takes a sent transaction off the queue ([error] null) or notes why it wasn't written. */
+    private suspend fun record(item: PendingTransaction, error: BridgeException?) {
+        val id = item.request.clientId
+        if (error == null) {
+            // It leaves the shown queue with the next snapshot, which has it (see refresh).
+            queue.update { list -> list.filterNot { it.request.clientId == id } }
+            return
+        }
+        val failed = item.copy(
+            attempts = item.attempts + 1,
+            rejectedReason = if (error.isPermanent) error.message else null,
+            lastError = error.message,
+        )
+        queue.update { list -> list.map { if (it.request.clientId == id) failed else it } }
+        // Only this one: the ones already sent stay shown until the snapshot has them.
+        _state.update { s -> s.copy(pending = s.pending.map { if (it.request.clientId == id) failed else it }) }
     }
 
     /** Runs [block]; if the Mac is unreachable, looks it up again over Bonjour (new IP) and retries once. */
@@ -289,6 +320,8 @@ class Repository(
 
     companion object {
         const val PAGE_SIZE = 100
+        /** The bridge takes at most 100 transactions per batch. */
+        private const val BATCH_SIZE = 100
         private const val SNAPSHOT_FILE = "snapshot.json"
     }
 }

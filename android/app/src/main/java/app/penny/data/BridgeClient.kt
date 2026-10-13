@@ -60,6 +60,11 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
         call(url(c.host, c.port, "transactions"), c.token,
             json.encodeToString(NewTransactionRequest.serializer(), request))
 
+    /** Older bridges don't have this (404); send one by one with [create] then. */
+    suspend fun createBatch(c: Connection, requests: List<NewTransactionRequest>): BatchResults =
+        call(url(c.host, c.port, "transactions/batch"), c.token,
+            json.encodeToString(NewTransactionBatch.serializer(), NewTransactionBatch(requests)))
+
     private fun url(host: String, port: Int, path: String): HttpUrl = HttpUrl.Builder()
         .scheme("http").host(host).port(port)
         .addPathSegments("api/v1/$path")

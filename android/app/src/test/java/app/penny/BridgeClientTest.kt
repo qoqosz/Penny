@@ -109,6 +109,28 @@ class BridgeClientTest {
         assertTrue(euros.contains("\"currency\":\"EUR\"") && euros.contains("\"exchangeRate\":\"4.25\""))
     }
 
+    @Test fun `sends the queue as one batch and reads each outcome`() = runTest {
+        server.enqueue(MockResponse().setBody("""
+            {"results":[{"clientId":"id-1","transactionId":"T1"},
+                        {"clientId":"id-2","error":{"status":422,"code":"invalid","message":"Invalid amount: -1"}}]}
+        """.trimIndent()))
+        val one = NewTransactionRequest("id-1", "A", "2026-10-03T09:30:00Z", "expense", "12.5")
+        val results = client.createBatch(connection, listOf(one, one.copy(clientId = "id-2", amount = "-1"))).results
+        assertEquals("T1", results[0].transactionId)
+        assertNull(results[0].error)
+        assertEquals(422, results[1].error?.status)
+        val request = server.takeRequest()
+        assertTrue(request.path!!.endsWith("/api/v1/transactions/batch"))
+        val body = request.body.readUtf8()
+        assertTrue(body.startsWith("{\"transactions\":[") && body.contains("\"clientId\":\"id-2\""))
+
+        // An older bridge doesn't know the endpoint; the repository then sends one by one.
+        server.enqueue(MockResponse().setResponseCode(404)
+            .setBody("""{"error":{"code":"not_found","message":"Unknown endpoint"}}"""))
+        val old = runCatching { client.createBatch(connection, listOf(one)) }.exceptionOrNull() as BridgeException
+        assertEquals(404, old.status)
+    }
+
     @Test fun `asks for messages in the app language`() = runTest {
         val previous = Locale.getDefault()
         try {

@@ -105,6 +105,28 @@ final class API {
                 throw BridgeError.internal("Transakcja zapisana, ale nie widać jej w bazie (\(id)).", en: "The transaction was saved but doesn't show up in the database (\(id)).")
             }
             return try .json(created, status: 201)
+        case ("POST", "/api/v1/transactions/batch"):
+            // The phone's whole queue in one write, so Money is quit and relaunched once.
+            struct BatchRequest: Decodable { let transactions: [NewTransactionRequest] }
+            struct ResultError: Encodable { let status: Int; let code: String; let message: String }
+            struct Result: Encodable { let clientId: String; let transactionId: String?; let error: ResultError? }
+            struct Response: Encodable { let results: [Result] }
+            let body = try decode(BatchRequest.self, request.body)
+            guard body.transactions.count <= Self.maxBatch else {
+                throw BridgeError.badRequest("Za dużo transakcji naraz (maks. \(Self.maxBatch)).",
+                                             en: "Too many transactions at once (max \(Self.maxBatch)).")
+            }
+            let language = Language(acceptLanguage: request.header("accept-language"))
+            let outcomes = try createTransactions(body.transactions)
+            return try .json(Response(results: zip(body.transactions, outcomes).map { request, outcome in
+                switch outcome {
+                case .success(let id):
+                    return Result(clientId: request.clientId, transactionId: id, error: nil)
+                case .failure(let e):
+                    return Result(clientId: request.clientId, transactionId: nil,
+                                  error: ResultError(status: e.status, code: e.code, message: e.clientMessage(in: language)))
+                }
+            }))
         default:
             throw BridgeError.notFound("Nieznany adres \(request.method) \(request.path)", en: "Unknown endpoint \(request.method) \(request.path)")
         }
@@ -139,15 +161,22 @@ final class API {
         return fresh
     }
 
+    /// The most transactions `POST transactions/batch` takes; the phone sends longer queues in parts.
+    static let maxBatch = 100
+
     func createTransaction(_ request: NewTransactionRequest) throws -> String {
+        try createTransactions([request])[0].get()
+    }
+
+    func createTransactions(_ requests: [NewTransactionRequest]) throws -> [Swift.Result<String, BridgeError>] {
         let (location, model, syncModel) = try ensureSetup()
         let writer = TransactionWriter(
             location: location, model: model, syncModel: syncModel, config: config,
             app: controlsMoneyApp ? MoneyAppController(appURL: location.appURL) : nil,
             backups: BackupManager(directory: Paths.backups, keep: config.backupsToKeep))
-        let id = try writer.create(request, snapshot: try currentSnapshot())
+        let outcomes = try writer.create(requests, snapshot: try currentSnapshot())
         snapshot = nil
-        return id
+        return outcomes
     }
 
     private struct StatusDTO: Encodable {
