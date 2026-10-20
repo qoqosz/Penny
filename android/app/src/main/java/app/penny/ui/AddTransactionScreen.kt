@@ -219,10 +219,10 @@ fun AddTransactionScreen(
             CategoryPicker(
                 // The amount's sign decides the kind, so both kinds are offered (e.g. a refund in an expense category).
                 categories = snapshot.categories.filter { c -> Kind.entries.any { it.api == c.kind } },
-                // Like Money, the other accounts follow as transfer targets: open ones in the same currency.
+                // Like Money, the other accounts follow as transfer targets: open ones in the same currency,
+                // hidden ones too (hiding only declutters the home screen).
                 accounts = snapshot.accounts.filter {
-                    !it.closed && it.id != form.accountId && it.currency == account?.currency &&
-                        (!it.isHidden(hidden) || it.id == form.transferAccountId)
+                    !it.closed && it.id != form.accountId && it.currency == account?.currency
                 },
                 transfersUnsupported = !snapshot.writesTransfers,
                 icons = repository.icons,
