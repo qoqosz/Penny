@@ -357,16 +357,20 @@ private fun AccountPicker(accounts: List<Account>, selectedId: String?, onSelect
 @Composable
 private fun PayeeField(value: String, suggestions: List<Payee>, icons: IconStore, onChange: (String, Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    // Closed after a pick or a tap outside, until the text changes again.
+    var closed by remember { mutableStateOf(false) }
     var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     val matches = remember(value, suggestions) {
         if (value.length < 2) emptyList()
         else suggestions.filter { it.name.contains(value, ignoreCase = true) && !it.name.equals(value, ignoreCase = true) }.take(6)
     }
-    ExposedDropdownMenuBox(expanded = focused && matches.isNotEmpty(), onExpandedChange = {}) {
+    val expanded = focused && !closed && matches.isNotEmpty()
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = {}) {
         OutlinedTextField(
             // A picked suggestion puts the cursor at the end of the name.
             value = if (field.text == value) field else TextFieldValue(value, TextRange(value.length)),
             onValueChange = {
+                if (it.text != value) closed = false
                 field = it
                 onChange(it.text, false)
             },
@@ -378,14 +382,17 @@ private fun PayeeField(value: String, suggestions: List<Payee>, icons: IconStore
                 .menuAnchor(MenuAnchorType.PrimaryEditable)
                 .onFocusChanged { focused = it.isFocused },
         )
-        ExposedDropdownMenu(expanded = focused && matches.isNotEmpty(), onDismissRequest = { focused = false }) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { closed = true }) {
             // Names stay aligned when only some payees have a logo.
             val withLogos = matches.any { it.iconId != null }
             matches.forEach { payee ->
                 val logo = rememberMoneyIcon(icons, payee.iconId)
                 DropdownMenuItem(
                     text = { Text(payee.name) },
-                    onClick = { onChange(payee.name, true) },
+                    onClick = {
+                        closed = true
+                        onChange(payee.name, true)
+                    },
                     leadingIcon = if (!withLogos) null else {
                         { if (logo != null) PayeeLogo(logo, size = 24.dp) else Spacer(Modifier.size(24.dp)) }
                     },
