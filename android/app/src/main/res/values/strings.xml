@@ -132,6 +132,12 @@
     <string name="details_no_map_app">No maps app to show the location</string>
     <string name="details_original_amount">Original amount</string>
     <string name="details_exchange_rate">Rate %1$s = %2$s</string>
+    <string name="details_investment">Investment</string>
+    <string name="details_investment_buy">Buy</string>
+    <string name="details_investment_sell">Sell</string>
+    <string name="details_investment_dividend">Dividend</string>
+    <string name="details_investment_split">Stock split</string>
+    <string name="details_split_ratio">%1$d for %2$d</string>
     <string name="details_transfer_to">To %s</string>
     <string name="details_transfer_from">From %s</string>
     <string name="details_splits">Split</string>

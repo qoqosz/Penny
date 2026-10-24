@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.CurrencyExchange
@@ -66,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
+import app.penny.data.Investment
 import app.penny.data.Location
 import app.penny.data.Repository
 import app.penny.data.Snapshot
@@ -231,6 +233,7 @@ private fun DetailsCard(tx: Transaction, snapshot: Snapshot?, repository: Reposi
                 )
             }
         }
+        tx.investment?.let { InvestmentItem(it, tx, snapshot) }
         if (tx.originalAmount != null && tx.originalCurrency != null) {
             val rate = tx.exchangeRate?.toBigDecimalOrNull()?.takeIf { it.signum() > 0 }
             DetailItem(
@@ -269,6 +272,39 @@ private fun DetailsCard(tx: Transaction, snapshot: Snapshot?, repository: Reposi
             )
         }
     }
+}
+
+/** The security, and for a buy or sell how many shares at what price (the amount is the total). */
+@Composable
+private fun InvestmentItem(investment: Investment, tx: Transaction, snapshot: Snapshot?) {
+    val security = snapshot?.security(investment.securityId)
+    val shares = investment.shares.toBigDecimalOrNull()?.takeIf { it.signum() != 0 }
+    val price = investment.price?.toBigDecimalOrNull()?.takeIf { it.signum() > 0 }
+    val details = buildList {
+        when {
+            investment.type == "split" && investment.splitTo != null && investment.splitFrom != null ->
+                add(stringResource(R.string.details_split_ratio, investment.splitTo, investment.splitFrom))
+            shares != null && price != null ->
+                // The price is in the transaction's own currency, which may not be the account's.
+                add(Format.shares(shares) + " × " + Format.rate(price, tx.originalCurrency ?: tx.currency))
+            shares != null -> add(pluralStringResource(R.plurals.shares, shares.toInt(), Format.shares(shares)))
+        }
+        security?.symbol?.let(::add)
+    }
+    DetailItem(
+        Icons.AutoMirrored.Outlined.ShowChart,
+        stringResource(
+            when (investment.type) {
+                "buy" -> R.string.details_investment_buy
+                "sell" -> R.string.details_investment_sell
+                "dividend" -> R.string.details_investment_dividend
+                "split" -> R.string.details_investment_split
+                else -> R.string.details_investment
+            },
+        ),
+        security?.name ?: stringResource(R.string.details_investment),
+        details.joinToString(" · ").ifEmpty { null },
+    )
 }
 
 @Composable

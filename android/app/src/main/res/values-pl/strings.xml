@@ -138,6 +138,12 @@
     <string name="details_no_map_app">Brak aplikacji z mapami</string>
     <string name="details_original_amount">Kwota oryginalna</string>
     <string name="details_exchange_rate">Kurs %1$s = %2$s</string>
+    <string name="details_investment">Inwestycja</string>
+    <string name="details_investment_buy">Kupno</string>
+    <string name="details_investment_sell">Sprzedaż</string>
+    <string name="details_investment_dividend">Dywidenda</string>
+    <string name="details_investment_split">Podział akcji</string>
+    <string name="details_split_ratio">%1$d za %2$d</string>
     <string name="details_transfer_to">Na %s</string>
     <string name="details_transfer_from">Z %s</string>
     <string name="details_splits">Podział</string>
