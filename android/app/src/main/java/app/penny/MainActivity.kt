@@ -2,6 +2,7 @@ package app.penny
 
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -18,11 +19,14 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val app = application as PennyApplication
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Keep transactions out of the recent-apps thumbnail while the app lock is on.
-            lifecycleScope.launch {
-                repeatOnLifecycle(Lifecycle.State.CREATED) {
-                    app.appLock.config.collect { setRecentsScreenshotEnabled(!it.enabled) }
+        // Keep transactions out of the recent-apps thumbnail while the app lock is on. Before Android 13 only
+        // FLAG_SECURE does that, which also blocks screenshots.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.CREATED) {
+                app.appLock.config.collect {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(!it.enabled)
+                    else if (it.enabled) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 }
             }
         }
