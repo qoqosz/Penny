@@ -338,6 +338,7 @@ enum SelfTest {
         check(backups.count == 5, "a backup before every write, one per batch")
 
         try interruptedWrites(location, config: config, api: api, account: ids.account)
+        try backupRetention(tmp.appendingPathComponent("retention"))
 
         print(failures == 0 ? "\nALL OK" : "\nFAILURES: \(failures)")
         if failures > 0 { exit(1) }
@@ -433,6 +434,35 @@ enum SelfTest {
         check(!WriteJournal.exists && FileManager.default.fileExists(atPath: Paths.unresolvedJournal.path)
               && FileManager.default.fileExists(atPath: backup + "-unfinished-write"),
               "… and the journal and backup are kept aside")
+    }
+
+    private static func backupRetention(_ dir: URL) throws {
+        print("Backup retention")
+        let fm = FileManager.default
+        let now = Date()
+        let calendar = Calendar.current
+        func at(daysAgo: Int, hour: Int) -> Date {
+            calendar.date(byAdding: .hour, value: hour, to: calendar.startOfDay(for: now.addingTimeInterval(Double(-daysAgo) * 86400)))!
+        }
+        let dates = [now.addingTimeInterval(-3600), now.addingTimeInterval(-7200), now.addingTimeInterval(-2 * 86400),
+                     at(daysAgo: 5, hour: 10), at(daysAgo: 5, hour: 18), at(daysAgo: 20, hour: 9), at(daysAgo: 40, hour: 9)]
+        func make() throws {
+            try? fm.removeItem(at: dir)
+            for date in dates {
+                try fm.createDirectory(at: dir.appendingPathComponent(BackupManager.directoryName(for: date)), withIntermediateDirectories: true)
+            }
+            try fm.createDirectory(at: dir.appendingPathComponent("2026-01-01_10-00-00-000-unfinished-write"), withIntermediateDirectories: true)
+        }
+        func left() -> Set<String> { Set((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []) }
+        let names = dates.map(BackupManager.directoryName(for:))
+
+        try make()
+        BackupManager(directory: dir, keep: 60).prune(now: now)
+        check(left() == Set([names[0], names[1], names[2], names[4], names[5], "2026-01-01_10-00-00-000-unfinished-write"]),
+              "all from the last 3 days, the newest of each day for 30 days, and one kept aside (\(left().sorted()))")
+        try make()
+        BackupManager(directory: dir, keep: 2).prune(now: now)
+        check(left() == Set([names[0], names[1], "2026-01-01_10-00-00-000-unfinished-write"]), "backupsToKeep caps the count")
     }
 
     private struct Seeded {

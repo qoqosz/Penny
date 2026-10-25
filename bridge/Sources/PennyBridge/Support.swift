@@ -189,7 +189,8 @@ struct BridgeConfig: Codable {
     /// Don't quit Money while it's the frontmost app (someone is using it); the phone retries later.
     var deferWhileMoneyActive: Bool = true
     var quitTimeoutSeconds: Double = 30
-    var backupsToKeep: Int = 30
+    /// The most backups kept; within it, every one from the last 3 days and one a day for 30 days (`BackupManager`).
+    var backupsToKeep: Int = 60
     /// SyncKit `SyncedEntityState.new`.
     var syncNewState: Int = 0
 
