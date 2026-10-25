@@ -85,7 +85,7 @@ struct BackupManager {
         return dir
     }
 
-    func restore(_ dir: URL, stores: [URL]) throws {
+    static func restore(_ dir: URL, stores: [URL]) throws {
         let fm = FileManager.default
         let data = try Data(contentsOf: dir.appendingPathComponent("manifest.json"))
         let manifest = try JSONFile.decoder.decode(Manifest.self, from: data)

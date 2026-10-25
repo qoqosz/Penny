@@ -76,6 +76,10 @@ Then:
 
 Service log: `~/Library/Logs/PennyBridge.log`. Database backups taken before every write:
 `~/Library/Application Support/PennyBridge/backups/` (the last 30).
+If the bridge is stopped in the middle of a write (it finishes the write first on `launchctl`, logout or shutdown, so
+this takes a crash or a power cut), it puts things right on its next start from `inflight.json`: a finished write is
+kept, an unfinished one is undone from its backup and the phone sends it again. When Money changed the data in
+between, the backup isn't restored automatically: the log says where it was kept aside.
 
 ## Installing on Android
 

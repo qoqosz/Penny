@@ -118,6 +118,10 @@ enum Paths {
     static var devices: URL { support.appendingPathComponent("devices.json") }
     static var pairing: URL { support.appendingPathComponent("pairing.json") }
     static var created: URL { support.appendingPathComponent("created.json") }
+    /// The write in progress (`WriteJournal`).
+    static var inflight: URL { support.appendingPathComponent("inflight.json") }
+    /// A journal that recovery couldn't act on, kept for a look.
+    static var unresolvedJournal: URL { support.appendingPathComponent("inflight-unresolved.json") }
     static var backups: URL { support.appendingPathComponent("backups", isDirectory: true) }
     static var installedBinary: URL { support.appendingPathComponent("bin/penny-bridge") }
 

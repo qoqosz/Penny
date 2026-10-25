@@ -77,44 +77,94 @@ final class TransactionWriter {
             throw BridgeError.setup("Nie znaleziono bazy synchronizacji Money (SyncKit). Czy synchronizacja z iCloud jest włączona?", en: "Money's sync database (SyncKit) not found. Is iCloud sync turned on?")
         }
 
-        var plans: [(index: Int, plan: Plan)] = []
-        for i in todo {
-            do {
-                plans.append((i, try validate(requests[i], snapshot: snapshot)))
-            } catch let error as BridgeError {
-                Log.info("Transaction \(requests[i].clientId) rejected: \(error.englishMessage)")
-                results[i] = .failure(error)
+        let busy = BridgeError.busy(
+            "Money jest otwarty na pierwszym planie na Macu, więc zapis czeka. Przełącz się na Macu na inną aplikację.",
+            en: "Money is open in front on the Mac, so the write waits. Switch to another app on the Mac.")
+        let wasRunning = app?.isRunning ?? false
+        var snapshot = snapshot
+        // A write the bridge was stopped in the middle of is put right first: its transactions may be in Money
+        // without being tracked in SyncKit, and the journal would be overwritten.
+        if WriteJournal.exists {
+            if let app, config.deferWhileMoneyActive, app.isFrontmost { throw busy }
+            if try WriteRecovery.run(money: location.storeURL, sync: syncStore, config: config, app: app, relaunch: false) == .busy {
+                throw busy
+            }
+            if MoneyLocator.generation(of: location.storeURL) != snapshot.generation {
+                snapshot = try MoneyReader.read(model: model, storeURL: location.storeURL, moneyVersion: location.moneyVersion)
             }
         }
+        var plans = plan(todo, requests, snapshot: snapshot, results: &results)
         if plans.isEmpty { return finish() }
         let conventions = try SyncConventions.learn(
             syncStore: syncStore, knownTransactionIDs: snapshot.transactions.prefix(200).map(\.id))
 
-        if let app, config.deferWhileMoneyActive, app.isFrontmost {
-            throw BridgeError.busy(
-                "Money jest otwarty na pierwszym planie na Macu, więc zapis czeka. Przełącz się na Macu na inną aplikację.",
-                en: "Money is open in front on the Mac, so the write waits. Switch to another app on the Mac.")
+        if let app, config.deferWhileMoneyActive, app.isFrontmost { throw busy }
+        var journal = WriteJournal(phase: .quitting, started: Date(),
+                                   relaunchMoney: app != nil && (wasRunning || config.launchMoneyAfterWrite))
+        try journal.save()
+        do {
+            _ = try app?.quit(timeout: config.quitTimeoutSeconds)
+        } catch {
+            WriteJournal.remove()
+            throw error
         }
-        let wasRunning = try app?.quit(timeout: config.quitTimeoutSeconds) ?? false
         defer {
-            if let app, wasRunning || config.launchMoneyAfterWrite { app.launchInBackground() }
+            if let app, journal.relaunchMoney { app.launchInBackground() }
         }
-        // Money may have saved something while quitting; anything we validated against must still hold.
-        guard MoneyLocator.generation(of: location.storeURL) == snapshot.generation || wasRunning else {
-            throw BridgeError.busy("Dane Money zmieniły się w trakcie zapisu. Spróbuj ponownie.", en: "Money's data changed during the write. Try again.")
+        // Money may have saved something before it quit (or iCloud brought changes): validate again against that.
+        if MoneyLocator.generation(of: location.storeURL) != snapshot.generation {
+            Log.info("Money's data changed before the write; reading it again")
+            do {
+                snapshot = try MoneyReader.read(model: model, storeURL: location.storeURL, moneyVersion: location.moneyVersion)
+            } catch {
+                WriteJournal.remove()
+                throw error
+            }
+            plans = plan(plans.map(\.index), requests, snapshot: snapshot, results: &results)
+            if plans.isEmpty {
+                WriteJournal.remove()
+                return finish()
+            }
         }
 
         let stores = [location.storeURL, syncStore]
-        let backup = try backups.create(stores: stores)
         let transactionIDs: [String]
         do {
+            journal.moneyBefore = try StoreFingerprint.money(location.storeURL)
+            journal.syncBefore = try StoreFingerprint.sync(syncStore)
+            journal.backup = try backups.create(stores: stores).path
+            journal.transactions = Dictionary(plans.map { ($0.plan.request.clientId, $0.plan.transactionID) }) { a, _ in a }
+            journal.phase = .writing
+            try journal.save()
+        } catch {
+            WriteJournal.remove()
+            throw error
+        }
+        do {
             let inserted = try insert(plans.map(\.plan), snapshot: snapshot)
+            journal.moneyAfter = try StoreFingerprint.money(location.storeURL)
+            journal.phase = .moneySaved
+            try journal.save()
+            try testHook?(.moneySaved)
             try SyncTracker.track(inserted.objects, model: syncModel, syncStore: syncStore,
                                   conventions: conventions, newState: config.syncNewState)
+            journal.syncAfter = try StoreFingerprint.sync(syncStore)
+            journal.phase = .tracked
+            try journal.save()
+            try testHook?(.tracked)
             transactionIDs = inserted.transactionIDs
+        } catch let crash as SimulatedCrash {
+            throw crash
         } catch {
             Log.error("Write failed, restoring the backup: \(error)")
-            try? backups.restore(backup, stores: stores)
+            do {
+                try BackupManager.restore(URL(fileURLWithPath: journal.backup!), stores: stores)
+                WriteJournal.remove()
+            } catch let restoreError {
+                // The journal stays, so the next start or write tries again.
+                Log.error("COULDN'T RESTORE the backup \(journal.backup!) after a failed write: \(restoreError). "
+                    + "Money's data may be half-written; run penny-bridge doctor.")
+            }
             throw error
         }
 
@@ -127,8 +177,44 @@ final class TransactionWriter {
                 + "\(plan.entries[0].signedAmount.plainString)\(foreign) in \(accounts)")
         }
         let cutoff = Date().addingTimeInterval(-180 * 86400)
-        try? JSONFile.write(created.filter { $0.value.created > cutoff }, to: Paths.created)
+        do {
+            try JSONFile.write(created.filter { $0.value.created > cutoff }, to: Paths.created)
+        } catch {
+            // Not a duplicate on retry: the transaction IDs come from the clientIds and are found in Money's data.
+            Log.error("Couldn't record the written transactions in \(Paths.created.path): \(error)")
+        }
+        WriteJournal.remove()
         return finish()
+    }
+
+    /// Self-test only: runs after each save, to make the write fail there (throw) or stop as if killed (`SimulatedCrash`).
+    var testHook: ((WriteJournal.Phase) throws -> Void)?
+
+    struct SimulatedCrash: Error {}
+
+    /// Validates the requests at [indices] against [snapshot]. Refused ones, and ones whose transaction is already in
+    /// Money (written before, but `created.json` doesn't say so), get their result; the rest are returned.
+    private func plan(_ indices: [Int], _ requests: [NewTransactionRequest], snapshot: MoneySnapshot,
+                      results: inout [Result<String, BridgeError>?]) -> [(index: Int, plan: Plan)] {
+        let existing = Set(snapshot.transactions.map(\.id))
+        var plans: [(index: Int, plan: Plan)] = []
+        for i in indices {
+            let id = snapshot.idStyle.make(from: requests[i].clientId)
+            if existing.contains(id) {
+                Log.info("Transaction \(requests[i].clientId) already in Money as \(id)")
+                results[i] = .success(id)
+                continue
+            }
+            do {
+                plans.append((i, try validate(requests[i], transactionID: id, snapshot: snapshot)))
+            } catch let error as BridgeError {
+                Log.info("Transaction \(requests[i].clientId) rejected: \(error.englishMessage)")
+                results[i] = .failure(error)
+            } catch {
+                results[i] = .failure(.internal(error.localizedDescription))
+            }
+        }
+        return plans
     }
 
     /// One transaction to insert: a single split in one account.
@@ -147,6 +233,8 @@ final class TransactionWriter {
 
     private struct Plan {
         let request: NewTransactionRequest
+        /// The (first) new transaction's ID, made from the clientId.
+        let transactionID: String
         /// One, or for a transfer the outgoing and the incoming side (whose splits are linked).
         let entries: [Entry]
         let currency: String
@@ -156,7 +244,7 @@ final class TransactionWriter {
         let note: String?
     }
 
-    private func validate(_ r: NewTransactionRequest, snapshot: MoneySnapshot) throws -> Plan {
+    private func validate(_ r: NewTransactionRequest, transactionID: String, snapshot: MoneySnapshot) throws -> Plan {
         guard let kind = Kind(rawValue: r.kind), kind != .system else {
             throw BridgeError.invalid("Nieobsługiwany rodzaj transakcji: \(r.kind)", en: "Unsupported transaction kind: \(r.kind)")
         }
@@ -174,7 +262,8 @@ final class TransactionWriter {
         let noteText = note?.isEmpty == false ? note : nil
 
         if kind == .transfer {
-            return try validateTransfer(r, amount: amount, from: account, snapshot: snapshot, payeeName: payeeName, note: noteText)
+            return try validateTransfer(r, transactionID: transactionID, amount: amount, from: account, snapshot: snapshot,
+                                        payeeName: payeeName, note: noteText)
         }
         guard r.transferAccountId == nil else {
             throw BridgeError.invalid("Konto docelowe ma tylko przelew.", en: "Only a transfer has a target account.")
@@ -210,11 +299,12 @@ final class TransactionWriter {
             account: account, transactionType: template.transactionType, splitType: template.splitType, flags: template.flags,
             hasCurrencyCode: template.hasCurrencyCode, categoryID: category?.id,
             signedAmount: kind == .expense ? -amount : amount, holdsLink: false)
-        return Plan(request: r, entries: [entry], currency: currency, rate: rate, payeeName: payeeName, note: noteText)
+        return Plan(request: r, transactionID: transactionID, entries: [entry], currency: currency, rate: rate,
+                    payeeName: payeeName, note: noteText)
     }
 
     /// A transfer is two transactions, like Money's own: minus in the account it leaves, plus in the one it goes to.
-    private func validateTransfer(_ r: NewTransactionRequest, amount: Decimal, from: AccountDTO, snapshot: MoneySnapshot,
+    private func validateTransfer(_ r: NewTransactionRequest, transactionID: String, amount: Decimal, from: AccountDTO, snapshot: MoneySnapshot,
                                   payeeName: String?, note: String?) throws -> Plan {
         guard let id = r.transferAccountId else {
             throw BridgeError.invalid("Przelew nie ma konta docelowego.", en: "The transfer has no target account.")
@@ -266,7 +356,7 @@ final class TransactionWriter {
                   signedAmount: amount, holdsLink: side.holdsLink)
         }
         return Plan(
-            request: r,
+            request: r, transactionID: transactionID,
             entries: [try entry(template.outgoing, own: from, other: to, amount: -amount),
                       try entry(template.incoming, own: to, other: from, amount: amount)],
             currency: from.currency, rate: 1, payeeName: payeeName, note: note)
@@ -310,13 +400,13 @@ final class TransactionWriter {
                 }
 
                 var inserted: [(tx: NSManagedObject, split: NSManagedObject)] = []
-                for entry in plan.entries {
+                for (index, entry) in plan.entries.enumerated() {
                     let account = try lookup("Account", entry.account.id)
                     let category = try entry.categoryID.map { try lookup("Category", $0) }
 
                     let tx = NSEntityDescription.insertNewObject(forEntityName: "Transaction", into: ctx)
                     for (key, value) in entry.flags { tx.setValue(value is NSNull ? nil : value, forKey: key) }
-                    tx.setValue(snapshot.idStyle.make(), forKey: "uniqueIdentifier")
+                    tx.setValue(index == 0 ? plan.transactionID : snapshot.idStyle.make(), forKey: "uniqueIdentifier")
                     tx.setValue(plan.request.date, forKey: "date")
                     tx.setValue(now, forKey: "lastModificationDate")
                     tx.setValue(NSNumber(value: Int16(entry.transactionType)), forKey: "transactionType")

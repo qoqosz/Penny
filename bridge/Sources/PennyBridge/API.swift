@@ -179,6 +179,27 @@ final class API {
         return outcomes
     }
 
+    /// Puts right a write the bridge was stopped in the middle of (see `WriteRecovery`). Returns false when Money is in
+    /// use, to try again later; other problems are logged and come up again with the next write.
+    func recoverUnfinishedWrite() -> Bool {
+        guard WriteJournal.exists else { return true }
+        do {
+            let (location, _, _) = try ensureSetup()
+            guard let syncStore = location.syncStoreURL else {
+                Log.error("An unfinished write was found, but not Money's SyncKit database")
+                return true
+            }
+            let outcome = try WriteRecovery.run(
+                money: location.storeURL, sync: syncStore, config: config,
+                app: controlsMoneyApp ? MoneyAppController(appURL: location.appURL) : nil, relaunch: true)
+            snapshot = nil
+            return outcome != .busy
+        } catch {
+            Log.error("Couldn't put right the unfinished write: \(error)")
+            return true
+        }
+    }
+
     private struct StatusDTO: Encodable {
         let bridgeVersion: String
         let name: String

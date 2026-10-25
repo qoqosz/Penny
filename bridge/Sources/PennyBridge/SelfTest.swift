@@ -337,8 +337,102 @@ enum SelfTest {
         let backups = (try? FileManager.default.contentsOfDirectory(atPath: Paths.backups.path)) ?? []
         check(backups.count == 5, "a backup before every write, one per batch")
 
+        try interruptedWrites(location, config: config, api: api, account: ids.account)
+
         print(failures == 0 ? "\nALL OK" : "\nFAILURES: \(failures)")
         if failures > 0 { exit(1) }
+    }
+
+    /// A write that fails between the two saves, and ones stopped there as if the bridge were killed.
+    private static func interruptedWrites(_ location: MoneyLocation, config: BridgeConfig, api: API, account: String) throws {
+        print("Failed and interrupted writes")
+        let model = try ModelLoader.load(location.modelURL)
+        let syncModel = try ModelLoader.load(location.syncModelURL)
+        let (money, sync) = (location.storeURL, location.syncStoreURL!)
+        func writer(stopAt phase: WriteJournal.Phase? = nil, crash: Bool = true) -> TransactionWriter {
+            let w = TransactionWriter(location: location, model: model, syncModel: syncModel, config: config, app: nil,
+                                      backups: BackupManager(directory: Paths.backups, keep: config.backupsToKeep))
+            w.testHook = { reached in
+                guard reached == phase else { return }
+                if crash { throw TransactionWriter.SimulatedCrash() }
+                throw BridgeError.internal("Test", en: "Injected failure")
+            }
+            return w
+        }
+        func request(_ clientID: String) -> NewTransactionRequest {
+            NewTransactionRequest(clientId: clientID, accountId: account, date: Date(), kind: "expense", amount: "2",
+                                  categoryId: nil, transferAccountId: nil, payeeName: "Kiosk \(clientID)", note: nil,
+                                  currency: nil, exchangeRate: nil)
+        }
+        func fingerprints() throws -> [String] { [try StoreFingerprint.money(money), try StoreFingerprint.sync(sync)] }
+        func write(_ w: TransactionWriter, _ clientID: String) -> Result<String, Error> {
+            Result { try w.create(request(clientID), snapshot: try api.currentSnapshot()) }
+        }
+        /// Whether the clientId's transaction is in Money's database, and tracked in SyncKit's.
+        func stored(_ clientID: String) throws -> (money: Bool, tracked: Bool) {
+            let id = IDStyle.upperUUID.make(from: clientID)
+            let inMoney = try SQLiteDB(path: money.path)
+                .query("SELECT COUNT(*) c FROM ZTRANSACTION WHERE ZUNIQUEIDENTIFIER = ?", [id]).first?["c"] as? Int64
+            let inSync = try SQLiteDB(path: sync.path)
+                .query("SELECT COUNT(*) c FROM ZQSSYNCEDENTITY WHERE ZIDENTIFIER = ?", ["Transaction.\(id)"]).first?["c"] as? Int64
+            return (inMoney == 1, inSync == 1)
+        }
+        func recover() throws -> WriteRecovery.Outcome {
+            try WriteRecovery.run(money: money, sync: sync, config: config, app: nil, relaunch: false)
+        }
+        let created = { JSONFile.read([String: CreatedRecord].self, from: Paths.created) ?? [:] }
+
+        let before = try fingerprints()
+        check((try? write(writer(stopAt: .moneySaved, crash: false), "fail-1").get()) == nil, "a failure between the two saves fails the write")
+        check(try fingerprints() == before && !WriteJournal.exists, "both databases restored, journal removed")
+
+        check((try? write(writer(stopAt: .moneySaved), "crash-1").get()) == nil && WriteJournal.read()?.phase == .moneySaved,
+              "a write stopped after Money's save leaves its journal")
+        check(try stored("crash-1") == (true, false), "… with the transaction in Money but not in SyncKit")
+        check(try recover() == .recovered && !WriteJournal.exists && (try fingerprints()) == before,
+              "on start, the unfinished write is undone from its backup")
+        check(try recover() == .nothing, "no journal, nothing to do")
+
+        let id = try write(writer(), "crash-1").get()
+        check(try stored("crash-1") == (true, true) && id == IDStyle.upperUUID.make(from: "crash-1"),
+              "the phone's retry writes it again, with the ID made from its clientId")
+        let afterRetry = try fingerprints()
+        try WriteJournal(phase: .moneySaved, started: Date(), relaunchMoney: false, backup: "/nonexistent",
+                         transactions: ["crash-1": id]).save()
+        check(try recover() == .recovered && !WriteJournal.exists && (try fingerprints()) == afterRetry,
+              "a journal of a write that finished (in created.json) is only dropped")
+
+        check((try? write(writer(stopAt: .tracked), "crash-2").get()) == nil && created()["crash-2"] == nil,
+              "a write stopped after both saves, before its record")
+        check(try recover() == .recovered && created()["crash-2"] != nil && (try stored("crash-2")) == (true, true),
+              "on start it's recorded as done, not undone")
+        var withoutRecord = created()
+        withoutRecord["crash-2"] = nil
+        try JSONFile.write(withoutRecord, to: Paths.created)
+        check(try write(writer(), "crash-2").get() == IDStyle.upperUUID.make(from: "crash-2"),
+              "a retry missing from created.json finds the transaction in Money instead of adding it again")
+
+        _ = try? write(writer(stopAt: .moneySaved), "crash-3")
+        _ = try write(writer(), "after-crash-3")
+        check(try stored("crash-3") == (false, false) && (try stored("after-crash-3")) == (true, true),
+              "the next write undoes an unfinished one first")
+        _ = try? write(writer(stopAt: .moneySaved), "crash-5")
+        check(try write(writer(), "crash-5").get() == IDStyle.upperUUID.make(from: "crash-5") && (try stored("crash-5")) == (true, true),
+              "a retry of the unfinished one, before any restart, ends up in SyncKit too")
+
+        _ = try? write(writer(stopAt: .moneySaved), "crash-4")
+        let backup = WriteJournal.read()?.backup ?? ""
+        // Money opened in between and changed a transaction.
+        let edit = try CoreDataStore(model: model, url: money, readOnly: false)
+        try edit.perform { ctx in
+            try ctx.fetchFirst("Transaction", NSPredicate(value: true))?.setValue(Date().addingTimeInterval(60), forKey: "lastModificationDate")
+            try ctx.save()
+        }
+        edit.close()
+        check(try recover() == .recovered && (try stored("crash-4")).money, "data changed since: the backup isn't restored")
+        check(!WriteJournal.exists && FileManager.default.fileExists(atPath: Paths.unresolvedJournal.path)
+              && FileManager.default.fileExists(atPath: backup + "-unfinished-write"),
+              "… and the journal and backup are kept aside")
     }
 
     private struct Seeded {
