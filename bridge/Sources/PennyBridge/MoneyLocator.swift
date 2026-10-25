@@ -124,7 +124,10 @@ enum MoneyLocator {
             .max() ?? .distantPast
     }
 
-    static func generation(of store: URL) -> String {
+    /// The store files' state (modification time and size): the cache key for reading, and how a write tells
+    /// that Money saved something since. Changes on any save, also of things the API doesn't send; the phone
+    /// gets content hashes instead (`MoneySnapshot.generation`).
+    static func fileGeneration(of store: URL) -> String {
         let fm = FileManager.default
         let parts = [store.path, store.path + "-wal"].map { path -> String in
             guard let attrs = try? fm.attributesOfItem(atPath: path) else { return "0" }

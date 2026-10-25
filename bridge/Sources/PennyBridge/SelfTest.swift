@@ -6,7 +6,7 @@ import CoreData
 enum SelfTest {
     private static var failures = 0
 
-    private static func check(_ condition: Bool, _ message: String) {
+    static func check(_ condition: Bool, _ message: String) {
         print(condition ? "  ✓ \(message)" : "  ✗ \(message)")
         if !condition { failures += 1 }
     }
@@ -56,7 +56,7 @@ enum SelfTest {
 
         print("HTTP server")
         let api = API(config: config, serviceName: "selftest", location: location, controlsMoneyApp: false)
-        let server = try HTTPServer(port: 0, serviceName: nil, handler: api.handle)
+        let server = try HTTPServer(port: 0, serviceName: nil, handler: api.handle, immediate: api.immediateResponse)
         try server.start()
         defer { server.stop() }
         let base = "http://127.0.0.1:\(server.port)/api/v1"
@@ -337,6 +337,8 @@ enum SelfTest {
         let backups = (try? FileManager.default.contentsOfDirectory(atPath: Paths.backups.path)) ?? []
         check(backups.count == 5, "a backup before every write, one per batch")
 
+        try syncChecks(base: base, token: token, location: location, api: api)
+
         print(failures == 0 ? "\nALL OK" : "\nFAILURES: \(failures)")
         if failures > 0 { exit(1) }
     }
@@ -468,19 +470,22 @@ enum SelfTest {
         return ids
     }
 
-    private struct Response {
+    struct Response {
         let status: Int
         let text: String
+        var headers: [String: String] = [:]
+        func header(_ name: String) -> String? { headers.first { $0.key.lowercased() == name.lowercased() }?.value }
         var json: [String: Any] {
             (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
         }
         var errorMessage: String? { (json["error"] as? [String: Any])?["message"] as? String }
     }
 
-    private static func call(_ method: String, _ url: String, token: String? = nil, language: String? = nil,
-                             body: [String: Any]? = nil) throws -> Response {
+    static func call(_ method: String, _ url: String, token: String? = nil, language: String? = nil,
+                     body: [String: Any]? = nil, headers: [String: String] = [:]) throws -> Response {
         var request = URLRequest(url: URL(string: url)!)
         request.httpMethod = method
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         // URLSession adds the system's Accept-Language unless one is set; an empty value stands for "no header".
         request.setValue(language ?? "", forHTTPHeaderField: "Accept-Language")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -491,8 +496,10 @@ enum SelfTest {
         let done = DispatchSemaphore(value: 0)
         var result = Response(status: 0, text: "")
         URLSession.shared.dataTask(with: request) { data, response, error in
-            result = Response(status: (response as? HTTPURLResponse)?.statusCode ?? -1,
-                              text: data.map { String(decoding: $0, as: UTF8.self) } ?? "\(error.map { "\($0)" } ?? "")")
+            let http = response as? HTTPURLResponse
+            result = Response(status: http?.statusCode ?? -1,
+                              text: data.map { String(decoding: $0, as: UTF8.self) } ?? "\(error.map { "\($0)" } ?? "")",
+                              headers: (http?.allHeaderFields ?? [:]).reduce(into: [:]) { $0["\($1.key)"] = "\($1.value)" })
             done.signal()
         }.resume()
         done.wait()

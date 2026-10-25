@@ -100,7 +100,7 @@ final class TransactionWriter {
             if let app, wasRunning || config.launchMoneyAfterWrite { app.launchInBackground() }
         }
         // Money may have saved something while quitting; anything we validated against must still hold.
-        guard MoneyLocator.generation(of: location.storeURL) == snapshot.generation || wasRunning else {
+        guard MoneyLocator.fileGeneration(of: location.storeURL) == snapshot.fileGeneration || wasRunning else {
             throw BridgeError.busy("Dane Money zmieniły się w trakcie zapisu. Spróbuj ponownie.", en: "Money's data changed during the write. Try again.")
         }
 

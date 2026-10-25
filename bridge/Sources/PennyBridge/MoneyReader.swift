@@ -132,7 +132,11 @@ struct TransactionDTO: Codable {
 }
 
 struct SnapshotDTO: Codable {
+    /// A hash of all transactions as `GET transactions` sends them: changes only when one of them does.
     let generation: String
+    /// A hash of the rest of this snapshot, also sent as the `ETag` header; `If-None-Match` with it answers 304
+    /// while nothing changed. Nil while it's being computed (the hash leaves it out).
+    var etag: String?
     let bridgeVersion: String
     let writesEnabled: Bool
     /// Transfers between accounts can be added (older bridges leave this out and reject them).
@@ -233,6 +237,9 @@ enum IDStyle: String {
 
 /// Everything read from Money in one pass. Rebuilt whenever the store file changes.
 struct MoneySnapshot {
+    /// The store files it was read from (`MoneyLocator.fileGeneration`); never sent to the phone.
+    let fileGeneration: String
+    /// A hash of [transactions]: what the phone compares to tell whether to download them again.
     let generation: String
     let defaultCurrency: String?
     let currencies: [String]
@@ -253,10 +260,14 @@ struct MoneySnapshot {
     func account(_ id: String) -> AccountDTO? { accounts.first { $0.id == id } }
     func category(_ id: String) -> CategoryDTO? { categories.first { $0.id == id } }
 
-    func dto(writesEnabled: Bool) -> SnapshotDTO {
-        SnapshotDTO(generation: generation, bridgeVersion: bridgeVersion, writesEnabled: writesEnabled, writesTransfers: true,
-                    defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts, categories: categories, payees: payees,
-                    securities: securities)
+    /// The snapshot as the API sends it, with its ETag: a hash of everything else in it.
+    func dto(writesEnabled: Bool) throws -> SnapshotDTO {
+        var dto = SnapshotDTO(
+            generation: generation, etag: nil, bridgeVersion: bridgeVersion, writesEnabled: writesEnabled, writesTransfers: true,
+            defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts, categories: categories, payees: payees,
+            securities: securities)
+        dto.etag = try ContentHash.of(value: dto)
+        return dto
     }
 }
 
@@ -265,13 +276,13 @@ struct MoneySnapshot {
 enum MoneyReader {
     /// `moneyVersion` (Money.app's build) versions the category icons that come with the app.
     static func read(model: NSManagedObjectModel, storeURL: URL, moneyVersion: String) throws -> MoneySnapshot {
-        let generation = MoneyLocator.generation(of: storeURL)
+        let fileGeneration = MoneyLocator.fileGeneration(of: storeURL)
         let store = try CoreDataStore(model: model, url: storeURL, readOnly: true)
         defer { store.close() }
-        return try store.perform { try build($0, generation: generation, moneyVersion: moneyVersion) }
+        return try store.perform { try build($0, fileGeneration: fileGeneration, moneyVersion: moneyVersion) }
     }
 
-    private static func build(_ ctx: NSManagedObjectContext, generation: String, moneyVersion: String) throws -> MoneySnapshot {
+    private static func build(_ ctx: NSManagedObjectContext, fileGeneration: String, moneyVersion: String) throws -> MoneySnapshot {
         let currencyObjects = try ctx.fetchAll("Currency")
         let defaultCurrency = currencyObjects.first { $0.bool("defaultCurrency") }?.string("code")
         // In Money's order (its currency settings), the default one first.
@@ -602,7 +613,7 @@ enum MoneyReader {
         }.sorted { ($0.usageCount, $1.name) > ($1.usageCount, $0.name) }
 
         return MoneySnapshot(
-            generation: generation, defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts,
+            fileGeneration: fileGeneration, generation: try ContentHash.of(items: transactions), defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts,
             categories: categories, payees: payees, securities: securities, iconSources: iconSources, transactions: transactions,
             templatesByCategory: templatesByCategory.mapValues(\.template),
             templatesByKind: templatesByKind, transferTemplates: transferTemplates.mapValues(\.template),

@@ -31,6 +31,7 @@ final class API {
     private var model: NSManagedObjectModel?
     private var syncModel: NSManagedObjectModel?
     private var snapshot: MoneySnapshot?
+    private var encodedSnapshot: (fileGeneration: String, body: Data, etag: String)?
     private let iconRenderer = IconRenderer()
 
     init(config: BridgeConfig, serviceName: String, location: MoneyLocation? = nil, controlsMoneyApp: Bool = true) {
@@ -53,11 +54,22 @@ final class API {
         }
     }
 
+    /// What the server answers on its I/O queue without waiting for the work queue (e.g. behind a write): the ping,
+    /// which only uses constants. Nil for everything else.
+    func immediateResponse(_ request: HTTPRequest) -> HTTPResponse? {
+        guard request.method == "GET", request.path == "/api/v1/ping" else { return nil }
+        return try? ping()
+    }
+
+    private func ping() throws -> HTTPResponse {
+        struct Ping: Encodable { let app = "penny-bridge"; let name: String; let version: String }
+        return try .json(Ping(name: serviceName, version: bridgeVersion))
+    }
+
     private func route(_ request: HTTPRequest) throws -> HTTPResponse {
         switch (request.method, request.path) {
         case ("GET", "/api/v1/ping"):
-            struct Ping: Encodable { let app = "penny-bridge"; let name: String; let version: String }
-            return try .json(Ping(name: serviceName, version: bridgeVersion))
+            return try ping()
         case ("POST", "/api/v1/pair"):
             struct PairRequest: Decodable { let code: String; let deviceName: String }
             struct PairResponse: Encodable { let token: String; let name: String }
@@ -76,7 +88,9 @@ final class API {
         case ("GET", "/api/v1/status"):
             return try .json(try status())
         case ("GET", "/api/v1/snapshot"):
-            return try .json(try currentSnapshot().dto(writesEnabled: config.writesEnabled))
+            let (body, etag) = try snapshotBody()
+            if HTTPResponse.matches(request, etag: etag) { return .notModified(etag: etag) }
+            return HTTPResponse(status: 200, body: body, headers: ["ETag": "\"\(etag)\""])
         case ("GET", "/api/v1/transactions"):
             let snapshot = try currentSnapshot()
             var items = snapshot.transactions
@@ -149,10 +163,21 @@ final class API {
         return (location!, model!, syncModel!)
     }
 
+    /// The encoded snapshot and its ETag, kept until the store changes, so a phone that only checks gets a 304
+    /// without the snapshot being encoded again.
+    private func snapshotBody() throws -> (body: Data, etag: String) {
+        let snapshot = try currentSnapshot()
+        if let cached = encodedSnapshot, cached.fileGeneration == snapshot.fileGeneration { return (cached.body, cached.etag) }
+        let dto = try snapshot.dto(writesEnabled: config.writesEnabled)
+        let body = try HTTPResponse.json(dto).body
+        encodedSnapshot = (snapshot.fileGeneration, body, dto.etag ?? "")
+        return (body, dto.etag ?? "")
+    }
+
     func currentSnapshot() throws -> MoneySnapshot {
         let (location, model, _) = try ensureSetup()
-        let generation = MoneyLocator.generation(of: location.storeURL)
-        if let snapshot, snapshot.generation == generation { return snapshot }
+        let fileGeneration = MoneyLocator.fileGeneration(of: location.storeURL)
+        if let snapshot, snapshot.fileGeneration == fileGeneration { return snapshot }
         let started = Date()
         let fresh = try MoneyReader.read(model: model, storeURL: location.storeURL, moneyVersion: location.moneyVersion)
         Log.info("Loaded Money data: \(fresh.accounts.count) accounts, \(fresh.transactions.count) transactions "
