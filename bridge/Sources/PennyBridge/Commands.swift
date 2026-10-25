@@ -27,7 +27,8 @@ enum Commands {
         let config = BridgeConfig.load()
         let name = config.serviceName ?? defaultServiceName
         let api = API(config: config, serviceName: name, controlsMoneyApp: config.controlMoneyApp)
-        let server = try HTTPServer(port: UInt16(config.port), serviceName: name, handler: api.handle)
+        let server = try HTTPServer(port: UInt16(config.port), serviceName: name, handler: api.handle,
+                                    immediate: api.immediateResponse)
         try server.start()
         Log.info("penny-bridge \(bridgeVersion) listening on port \(server.port) as “\(name)”")
         for address in localIPv4Addresses() { Log.info("  http://\(address):\(server.port)") }

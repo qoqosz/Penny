@@ -50,6 +50,33 @@ struct HTTPResponse {
     var status: Int
     var body: Data
     var contentType = "application/json; charset=utf-8"
+    var headers: [String: String] = [:]
+
+    /// The answer to a conditional GET whose `If-None-Match` names [etag]: no body.
+    static func notModified(etag: String) -> HTTPResponse {
+        HTTPResponse(status: 304, body: Data(), headers: ["ETag": "\"\(etag)\""])
+    }
+
+    /// Whether the request's `If-None-Match` lists [etag] (quoted or not, weak or not) or is `*`.
+    static func matches(_ request: HTTPRequest, etag: String) -> Bool {
+        guard let header = request.header("if-none-match") else { return false }
+        return header.split(separator: ",").contains { item in
+            var tag = item.trimmingCharacters(in: .whitespaces)
+            if tag.hasPrefix("W/") { tag.removeFirst(2) }
+            return tag == "*" || tag.trimmingCharacters(in: CharacterSet(charactersIn: "\"")) == etag
+        }
+    }
+
+    /// gzip-compressed when the client accepts it and the body is large enough to be worth it.
+    func compressed(for request: HTTPRequest) -> HTTPResponse {
+        guard body.count >= Gzip.minimumSize, headers["Content-Encoding"] == nil,
+              Gzip.accepted(by: request.header("accept-encoding")), let gzipped = Gzip.compress(body)
+        else { return self }
+        var response = self
+        response.body = gzipped
+        response.headers["Content-Encoding"] = "gzip"
+        return response
+    }
 
     static func json<T: Encodable>(_ value: T, status: Int = 200) throws -> HTTPResponse {
         do {
@@ -68,11 +95,13 @@ struct HTTPResponse {
     }
 
     func serialized() -> Data {
-        let reason = [200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found",
+        let reason = [200: "OK", 201: "Created", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found",
                       409: "Conflict", 422: "Unprocessable Entity", 500: "Internal Server Error",
                       503: "Service Unavailable"][status] ?? "Status"
         var head = "HTTP/1.1 \(status) \(reason)\r\n"
-        head += "Content-Type: \(contentType)\r\nContent-Length: \(body.count)\r\n"
+        // A 304 has no body, so no type or length either.
+        if status != 304 { head += "Content-Type: \(contentType)\r\nContent-Length: \(body.count)\r\n" }
+        for (name, value) in headers.sorted(by: { $0.key < $1.key }) { head += "\(name): \(value)\r\n" }
         head += "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
         return Data(head.utf8) + body
     }
@@ -87,9 +116,13 @@ final class HTTPServer {
     /// Requests are handled one at a time: the Money store is never accessed concurrently.
     private let workQueue = DispatchQueue(label: "penny.http.work")
     private let handler: (HTTPRequest) -> HTTPResponse
+    /// Answers what it can right away on the I/O queue (nil for the rest), so a ping doesn't wait behind a write.
+    /// It must not touch anything the work queue does.
+    private let immediate: ((HTTPRequest) -> HTTPResponse?)?
     private(set) var port: UInt16 = 0
 
-    init(port: UInt16, serviceName: String?, handler: @escaping (HTTPRequest) -> HTTPResponse) throws {
+    init(port: UInt16, serviceName: String?, handler: @escaping (HTTPRequest) -> HTTPResponse,
+         immediate: ((HTTPRequest) -> HTTPResponse?)? = nil) throws {
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
         listener = try NWListener(using: parameters, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
@@ -98,6 +131,7 @@ final class HTTPServer {
             listener.service = NWListener.Service(name: serviceName, type: Self.bonjourType, domain: nil, txtRecord: txt)
         }
         self.handler = handler
+        self.immediate = immediate
     }
 
     /// Starts listening and waits until the socket is ready.
@@ -141,9 +175,13 @@ final class HTTPServer {
             if let data { buffer.append(data) }
             switch HTTPRequest.parse(buffer) {
             case .complete(let request):
+                if let response = self.immediate?(request) {
+                    self.send(response.compressed(for: request), on: connection)
+                    return
+                }
                 self.workQueue.async {
                     let started = Date()
-                    let response = self.handler(request)
+                    let response = self.handler(request).compressed(for: request)
                     Log.info("\(request.method) \(request.path) → \(response.status) (\(Int(Date().timeIntervalSince(started) * 1000)) ms)")
                     self.send(response, on: connection)
                 }
