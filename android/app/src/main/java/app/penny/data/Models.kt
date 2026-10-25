@@ -160,7 +160,10 @@ data class Transaction(
 
 @Serializable
 data class Snapshot(
+    /** Changes only when the transactions do (older bridges: whenever Money's database does). */
     val generation: String,
+    /** Sent back as `If-None-Match`, so the Mac answers 304 while nothing changed. Null from older bridges. */
+    val etag: String? = null,
     val bridgeVersion: String,
     val writesEnabled: Boolean,
     /** False from bridges that can't add transfers between accounts (they reject them). */

@@ -10,6 +10,7 @@ import app.penny.ui.Format
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okio.buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -154,6 +155,39 @@ class BridgeClientTest {
         server.shutdown()
         val error = runCatching { client.snapshot(connection) }.exceptionOrNull()
         assertTrue(error is UnreachableException)
+    }
+
+    private val minimalSnapshot = """
+        {"generation":"tx1","etag":"e1","bridgeVersion":"1.0.0","writesEnabled":true,"accounts":[],"categories":[],"payees":[]}
+    """.trimIndent()
+
+    @Test fun `snapshot unchanged since its ETag comes back as null`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(304).setHeader("ETag", "\"e1\""))
+        assertNull(client.snapshotIfChanged(connection, "e1"))
+        assertEquals("\"e1\"", server.takeRequest().getHeader("If-None-Match"))
+    }
+
+    @Test fun `changed snapshot comes with its new ETag`() = runTest {
+        server.enqueue(MockResponse().setBody(minimalSnapshot.replace("e1", "e2")).setHeader("ETag", "\"e2\""))
+        val snapshot = client.snapshotIfChanged(connection, "e1")
+        assertEquals("e2", snapshot?.etag)
+        assertEquals("tx1", snapshot?.generation)
+    }
+
+    @Test fun `without an ETag the snapshot is asked for unconditionally`() = runTest {
+        // Also what an older bridge does: no etag field, and If-None-Match ignored.
+        server.enqueue(MockResponse().setBody(minimalSnapshot.replace(""""etag":"e1",""", "")))
+        val snapshot = client.snapshotIfChanged(connection, null)
+        assertNull(snapshot?.etag)
+        assertEquals("tx1", snapshot?.generation)
+        assertNull(server.takeRequest().getHeader("If-None-Match"))
+    }
+
+    @Test fun `gzipped answers are inflated`() = runTest {
+        val gzipped = okio.Buffer().also { b -> okio.GzipSink(b).buffer().use { it.writeUtf8(minimalSnapshot) } }
+        server.enqueue(MockResponse().setBody(gzipped).setHeader("Content-Encoding", "gzip"))
+        assertEquals("e1", client.snapshot(connection).etag)
+        assertEquals("gzip", server.takeRequest().getHeader("Accept-Encoding"))
     }
 
     @Test fun `parses amounts typed by the user`() {

@@ -42,6 +42,10 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
 
     suspend fun snapshot(c: Connection): Snapshot = call(url(c.host, c.port, "snapshot"), c.token, null)
 
+    /** The snapshot, or null when it's still the one with [etag] (the Mac answers 304). Older bridges always send it. */
+    suspend fun snapshotIfChanged(c: Connection, etag: String?): Snapshot? =
+        call<Snapshot?>(url(c.host, c.port, "snapshot"), c.token, null, ifNoneMatch = etag)
+
     suspend fun transactions(c: Connection, accountId: String?, offset: Int, limit: Int): TransactionPage {
         val url = url(c.host, c.port, "transactions").newBuilder()
             .apply { if (accountId != null) addQueryParameter("accountId", accountId) }
@@ -70,12 +74,14 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
         .addPathSegments("api/v1/$path")
         .build()
 
-    private suspend inline fun <reified T> call(url: HttpUrl, token: String?, body: String?): T =
+    /** With [ifNoneMatch], a 304 gives null, so [T] must be nullable then. */
+    private suspend inline fun <reified T> call(url: HttpUrl, token: String?, body: String?, ifNoneMatch: String? = null): T =
         withContext(Dispatchers.IO) {
             val request = Request.Builder().url(url).apply {
                 // The bridge writes its error messages in this language. The default locale follows Penny's language setting.
                 header("Accept-Language", Locale.getDefault().toLanguageTag())
                 if (token != null) header("Authorization", "Bearer $token")
+                if (ifNoneMatch != null) header("If-None-Match", "\"$ifNoneMatch\"")
                 if (body != null) post(body.toRequestBody(jsonType))
             }.build()
             val response = try {
@@ -84,6 +90,8 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
                 throw UnreachableException(e)
             }
             response.use {
+                @Suppress("UNCHECKED_CAST")
+                if (ifNoneMatch != null && it.code == 304) return@use null as T
                 val text = it.body?.string().orEmpty()
                 if (!it.isSuccessful) {
                     val error = runCatching { json.decodeFromString(ApiErrorBody.serializer(), text).error }.getOrNull()

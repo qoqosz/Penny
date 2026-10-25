@@ -125,9 +125,11 @@ class Repository(
         _state.update { it.copy(status = SyncStatus.Syncing) }
         val status = try {
             val connection = withReconnect(bridge) { c -> if (push) pushPending(c); c }
-            val snapshot = client.snapshot(connection)
-            val changed = snapshot.generation != _state.value.snapshot?.generation
-            cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
+            val cached = _state.value.snapshot
+            // Null (304) while the Mac's snapshot is still the cached one.
+            val snapshot = client.snapshotIfChanged(connection, cached?.etag) ?: cached ?: client.snapshot(connection)
+            val changed = snapshot.generation != cached?.generation
+            if (snapshot !== cached) cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
             // Together, so balances never count a sent transaction twice (queued and in the snapshot) or not at all.
             _state.update { it.copy(snapshot = snapshot, pending = queue.all(), dataVersion = it.dataVersion + if (changed) 1 else 0) }
             offline.update(connection, snapshot.generation)
