@@ -32,13 +32,37 @@ enum Commands {
         try server.start()
         Log.info("penny-bridge \(bridgeVersion) listening on port \(server.port) as “\(name)”")
         for address in localIPv4Addresses() { Log.info("  http://\(address):\(server.port)") }
-        do {
-            let snapshot = try api.currentSnapshot()
-            Log.info("Money data OK: \(snapshot.accounts.count) accounts")
-        } catch {
-            Log.warn("\(error)")
+        // On SIGTERM (launchctl, logout, shutdown) or Ctrl-C, a write in progress finishes first, Money relaunch included.
+        let stopSignals = [SIGTERM, SIGINT].map { number -> DispatchSourceSignal in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler {
+                Log.info("Stopping (signal \(number)) once the request in progress is done")
+                server.drain {
+                    Log.info("Stopped")
+                    exit(0)
+                }
+            }
+            source.resume()
+            return source
         }
-        RunLoop.main.run()
+        func recover() {
+            server.enqueue {
+                if !api.recoverUnfinishedWrite() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 60) { recover() }
+                }
+            }
+        }
+        recover()
+        server.enqueue {
+            do {
+                let snapshot = try api.currentSnapshot()
+                Log.info("Money data OK: \(snapshot.accounts.count) accounts")
+            } catch {
+                Log.warn("\(error)")
+            }
+        }
+        withExtendedLifetime(stopSignals) { RunLoop.main.run() }
     }
 
     static func pair() throws {
@@ -205,6 +229,8 @@ enum Commands {
             "ProgramArguments": [target.path, "serve"],
             "RunAtLoad": true,
             "KeepAlive": true,
+            // Time for a write in progress to finish on SIGTERM (quitting Money can take 30 s) before launchd kills it.
+            "ExitTimeOut": 120,
             "LimitLoadToSessionType": "Aqua",
             "ProcessType": "Interactive",
             "StandardOutPath": Paths.logFile.path,

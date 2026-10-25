@@ -75,7 +75,11 @@ Then:
 4. If macOS asks about incoming connections or local network access, allow it.
 
 Service log: `~/Library/Logs/PennyBridge.log`. Database backups taken before every write:
-`~/Library/Application Support/PennyBridge/backups/` (the last 30).
+`~/Library/Application Support/PennyBridge/backups/` (every one from the last 3 days, then one a day for a month).
+If the bridge is stopped in the middle of a write (it finishes the write first on `launchctl`, logout or shutdown, so
+this takes a crash or a power cut), it puts things right on its next start from `inflight.json`: a finished write is
+kept, an unfinished one is undone from its backup and the phone sends it again. When Money changed the data in
+between, the backup isn't restored automatically: the log says where it was kept aside.
 
 ## Installing on Android
 
@@ -142,7 +146,8 @@ The settings screen (gear icon on the main screen) offers:
 | `penny-bridge demo DIR` | database with made-up data, for screenshots and trying the app |
 
 Configuration: `~/Library/Application Support/PennyBridge/config.json`, including `port`, `writesEnabled`
-(turns writing off) and `launchMoneyAfterWrite`.
+(turns writing off), `launchMoneyAfterWrite` and `backupsToKeep` (the most backups kept, newest first, on top of the
+3-day/30-day rule; 60 by default, configurations written by earlier versions have 30).
 
 ## Demo data
 

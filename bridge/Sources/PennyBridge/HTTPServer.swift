@@ -163,6 +163,15 @@ final class HTTPServer {
 
     func stop() { listener.cancel() }
 
+    /// Runs [body] on the work queue, after the requests received so far (never alongside one).
+    func enqueue(_ body: @escaping () -> Void) { workQueue.async(execute: body) }
+
+    /// Stops taking connections and runs [body] once the requests received so far are done (e.g. a write).
+    func drain(then body: @escaping () -> Void) {
+        stop()
+        enqueue(body)
+    }
+
     private func accept(_ connection: NWConnection) {
         connection.start(queue: ioQueue)
         receive(connection, buffer: Data())

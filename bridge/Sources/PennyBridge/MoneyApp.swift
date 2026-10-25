@@ -85,7 +85,7 @@ struct BackupManager {
         return dir
     }
 
-    func restore(_ dir: URL, stores: [URL]) throws {
+    static func restore(_ dir: URL, stores: [URL]) throws {
         let fm = FileManager.default
         let data = try Data(contentsOf: dir.appendingPathComponent("manifest.json"))
         let manifest = try JSONFile.decoder.decode(Manifest.self, from: data)
@@ -100,12 +100,32 @@ struct BackupManager {
         Log.warn("Restored backup \(dir.lastPathComponent)")
     }
 
-    private func prune() {
+    /// Keeps every backup from the last 3 days and the newest of each earlier day back to 30 days, at most `keep`
+    /// in all (the newest). Folders whose names aren't backup dates (e.g. one kept aside after an unfinished write)
+    /// are left alone.
+    func prune(now: Date = Date()) {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
-        let sorted = entries.filter { $0.hasDirectoryPath }.sorted { $0.lastPathComponent > $1.lastPathComponent }
-        for old in sorted.dropFirst(max(keep, 1)) {
-            try? fm.removeItem(at: old)
+        let dated = entries.filter { $0.hasDirectoryPath }
+            .compactMap { url in Self.formatter.date(from: url.lastPathComponent).map { (url, $0) } }
+            .sorted { $0.1 > $1.1 }
+        var days = Set<Date>()
+        var kept = 0
+        for (url, date) in dated {
+            let age = now.timeIntervalSince(date)
+            let newestOfDay = days.insert(Calendar.current.startOfDay(for: date)).inserted
+            let wanted = age < Self.keepAllDays * 86400 || (age < Self.keepDailyDays * 86400 && newestOfDay)
+            if wanted && kept < max(keep, 1) {
+                kept += 1
+            } else {
+                try? fm.removeItem(at: url)
+            }
         }
     }
+
+    static let keepAllDays: TimeInterval = 3
+    static let keepDailyDays: TimeInterval = 30
+
+    /// The folder name of a backup taken at [date] (self-test).
+    static func directoryName(for date: Date) -> String { formatter.string(from: date) }
 }
