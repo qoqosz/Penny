@@ -56,7 +56,8 @@ enum SelfTest {
 
         print("HTTP server")
         let api = API(config: config, serviceName: "selftest", location: location, controlsMoneyApp: false)
-        let server = try HTTPServer(port: 0, serviceName: nil, handler: api.handle)
+        let work = DispatchQueue(label: "penny.selftest.work")
+        let server = try HTTPServer(port: 0, serviceName: nil, workQueue: work, handler: api.handle)
         try server.start()
         defer { server.stop() }
         let base = "http://127.0.0.1:\(server.port)/api/v1"
@@ -69,12 +70,61 @@ enum SelfTest {
         let unauthorizedEN = try call("GET", "\(base)/snapshot", language: "en-US")
         check(unauthorizedEN.errorMessage == "Not authorized. Pair the device again.", "English message for en-US")
 
+        print("Devices")
+        // devices.json from before devices had IDs.
+        try FileManager.default.createDirectory(at: Paths.support, withIntermediateDirectories: true)
+        try Data("""
+            [{"name": "Old phone", "tokenHash": "\(Auth.hash("old-token"))", "created": "2026-01-01T00:00:00Z"}]
+            """.utf8).write(to: Paths.devices)
+        let old = Auth.device(forAuthorizationHeader: "Bearer old-token")
+        check(old != nil && old?.id.isEmpty == false, "old devices.json loads, and the device gets an ID")
+        check(Auth.devices().first?.id == old?.id, "the ID is saved")
+        check(try call("GET", "\(base)/status", token: "old-token").status == 200, "an old device's token still works")
+        check(Auth.devices().first?.lastSeen != nil, "a request notes when the device was last seen")
+
         let code = try Auth.startPairing()
         check(try call("POST", "\(base)/pair", body: ["code": "abcdef", "deviceName": "x"]).status == 401,
               "wrong pairing code rejected")
         let pair = try call("POST", "\(base)/pair", body: ["code": code, "deviceName": "Test phone"])
         let token = pair.json["token"] as? String ?? ""
         check(pair.status == 200 && !token.isEmpty, "pairing returns a token")
+
+        let secondCode = try Auth.startPairing()
+        let secondToken = try call("POST", "\(base)/pair", body: ["code": secondCode, "deviceName": "Test phone"])
+            .json["token"] as? String ?? ""
+        if case .ambiguous(let matches) = try Auth.revoke("Test phone") {
+            check(matches.count == 2 && Auth.devices().count == 3, "revoke by a name two devices share removes neither")
+        } else {
+            check(false, "revoke by a name two devices share removes neither")
+        }
+        let deleted = try call("DELETE", "\(base)/device", token: secondToken)
+        check(deleted.status == 200 && deleted.json["revoked"] as? Bool == true, "DELETE /device → 200")
+        check(try call("GET", "\(base)/status", token: secondToken).status == 401, "the revoked token no longer works")
+        check(try call("GET", "\(base)/status", token: token).status == 200, "the other device's token still works")
+        if case .revoked = try Auth.revoke(old?.id ?? "?") {
+            check(Auth.devices().map(\.name) == ["Test phone"], "revoke by ID")
+        } else {
+            check(false, "revoke by ID")
+        }
+
+        print("HTTPS")
+        let tlsServer = Commands.startTLSServer(api: api, port: 0, workQueue: work)
+        defer { tlsServer?.stop() }
+        let identity = try TLSIdentity.loadOrCreate()
+        let keyMode = (try FileManager.default.attributesOfItem(atPath: Paths.tlsKey.path)[.posixPermissions] as? NSNumber)?.intValue
+        check(tlsServer != nil && keyMode == 0o600, "certificate created, key readable by the user only")
+        let plainPing = try call("GET", "\(base)/ping")
+        check(plainPing.json["tlsPort"] as? Int == Int(tlsServer?.port ?? 0)
+                && plainPing.json["fingerprint"] as? String == identity.fingerprint,
+              "ping tells the HTTPS port and the certificate's fingerprint")
+        check(identity.shortFingerprint.count == 19 && identity.shortFingerprint.split(separator: " ").count == 4,
+              "short fingerprint \(identity.shortFingerprint)")
+        let tlsBase = "https://127.0.0.1:\(tlsServer?.port ?? 0)/api/v1"
+        check(try call("GET", "\(tlsBase)/status", token: token, pin: identity.fingerprint).status == 200,
+              "HTTPS works with the pinned certificate")
+        let wrongPin = String(repeating: "0", count: 64)
+        check(try call("GET", "\(tlsBase)/ping", pin: wrongPin).status == -1, "HTTPS refused with another fingerprint")
+        check(try TLSIdentity.loadOrCreate().fingerprint == identity.fingerprint, "the certificate is kept between starts")
 
         print("Reading")
         let snap = try call("GET", "\(base)/snapshot", token: token)
@@ -477,8 +527,24 @@ enum SelfTest {
         var errorMessage: String? { (json["error"] as? [String: Any])?["message"] as? String }
     }
 
+    /// Accepts only the server certificate with this SHA-256, as the phone does once paired.
+    private final class Pinning: NSObject, URLSessionDelegate {
+        let fingerprint: String
+        init(_ fingerprint: String) { self.fingerprint = fingerprint }
+
+        func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+            guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+                  let trust = challenge.protectionSpace.serverTrust,
+                  let leaf = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first,
+                  TLSIdentity.fingerprint(of: SecCertificateCopyData(leaf) as Data) == fingerprint
+            else { return completionHandler(.cancelAuthenticationChallenge, nil) }
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        }
+    }
+
     private static func call(_ method: String, _ url: String, token: String? = nil, language: String? = nil,
-                             body: [String: Any]? = nil) throws -> Response {
+                             body: [String: Any]? = nil, pin: String? = nil) throws -> Response {
         var request = URLRequest(url: URL(string: url)!)
         request.httpMethod = method
         // URLSession adds the system's Accept-Language unless one is set; an empty value stands for "no header".
@@ -490,7 +556,9 @@ enum SelfTest {
         }
         let done = DispatchSemaphore(value: 0)
         var result = Response(status: 0, text: "")
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let session = pin.map { URLSession(configuration: .ephemeral, delegate: Pinning($0), delegateQueue: nil) } ?? .shared
+        defer { if pin != nil { session.finishTasksAndInvalidate() } }
+        session.dataTask(with: request) { data, response, error in
             result = Response(status: (response as? HTTPURLResponse)?.statusCode ?? -1,
                               text: data.map { String(decoding: $0, as: UTF8.self) } ?? "\(error.map { "\($0)" } ?? "")")
             done.signal()

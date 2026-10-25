@@ -171,6 +171,8 @@ enum JSONFile {
 
 struct BridgeConfig: Codable {
     var port: Int = 8765
+    /// HTTPS with the bridge's own certificate, which phones pin when they pair; 0 turns it off.
+    var tlsPort: Int = 8767
     /// Bonjour name; defaults to the Mac's name.
     var serviceName: String?
     var moneyAppPath: String = "/Applications/Money.app"
@@ -195,6 +197,7 @@ struct BridgeConfig: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = BridgeConfig()
         port = try c.decodeIfPresent(Int.self, forKey: .port) ?? d.port
+        tlsPort = try c.decodeIfPresent(Int.self, forKey: .tlsPort) ?? d.tlsPort
         serviceName = try c.decodeIfPresent(String.self, forKey: .serviceName)
         moneyAppPath = try c.decodeIfPresent(String.self, forKey: .moneyAppPath) ?? d.moneyAppPath
         moneyStorePath = try c.decodeIfPresent(String.self, forKey: .moneyStorePath)
