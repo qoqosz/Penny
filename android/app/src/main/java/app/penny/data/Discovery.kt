@@ -17,8 +17,13 @@ import java.net.Inet4Address
 
 data class DiscoveredBridge(val name: String, val host: String, val port: Int)
 
+/** Looks up a paired bridge by its Bonjour name (what [Repository] needs of [Discovery]). */
+fun interface BridgeFinder {
+    suspend fun find(name: String): DiscoveredBridge?
+}
+
 /** Finds penny-bridge instances advertised over Bonjour (`_penny._tcp`) on the local network. */
-class Discovery(context: Context) {
+class Discovery(context: Context) : BridgeFinder {
     private val nsd = context.getSystemService(NsdManager::class.java)
     private val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
 
@@ -56,7 +61,9 @@ class Discovery(context: Context) {
     }
 
     /** Looks for a bridge with the given Bonjour name, e.g. after the Mac got a new IP address. */
-    suspend fun find(name: String, timeoutMs: Long = 4000): DiscoveredBridge? = withTimeoutOrNull(timeoutMs) {
+    override suspend fun find(name: String): DiscoveredBridge? = find(name, timeoutMs = 4000)
+
+    suspend fun find(name: String, timeoutMs: Long): DiscoveredBridge? = withTimeoutOrNull(timeoutMs) {
         browse().first { list -> list.any { it.name == name } }.first { it.name == name }
     }
 

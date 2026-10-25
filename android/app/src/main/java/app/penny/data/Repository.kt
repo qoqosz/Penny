@@ -1,5 +1,6 @@
 package app.penny.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,8 @@ sealed interface SyncStatus {
     data class Offline(val hasCachedData: Boolean) : SyncStatus
     /** [message] comes from the bridge. */
     data class Error(val message: String) : SyncStatus
+    /** Something on the phone's side: an answer it can't read, storage that can't be written. */
+    data class Failed(val error: Throwable) : SyncStatus
 }
 
 data class AppState(
@@ -45,7 +48,7 @@ data class AppState(
 class Repository(
     private val settings: Settings,
     private val client: BridgeClient,
-    private val discovery: Discovery,
+    private val discovery: BridgeFinder,
     private val cache: JsonStore,
     private val queue: PendingQueue,
     val icons: IconStore,
@@ -141,8 +144,14 @@ class Repository(
             SyncStatus.Offline(hasCachedData = _state.value.snapshot != null)
         } catch (e: BridgeException) {
             SyncStatus.Error(e.message.orEmpty())
+        } catch (e: CancellationException) {
+            _state.update { it.copy(status = SyncStatus.Idle) }
+            throw e
+        } catch (e: Exception) {
+            // Never left at Syncing, and never a crash: refresh runs on every return to the app.
+            SyncStatus.Failed(e)
         }
-        _state.update { it.copy(status = status, pending = queue.all()) }
+        _state.update { it.copy(status = status, pending = runCatching { queue.all() }.getOrDefault(it.pending)) }
         // Also without the Mac: rates and prices come from the internet.
         scope.launch { updateRates() }
         scope.launch { updatePrices() }
@@ -152,10 +161,10 @@ class Repository(
      * Downloads the exchange rates between Money's currencies, back to the first transaction. Without [force],
      * a recent download is kept.
      */
-    suspend fun updateRates(force: Boolean = false) {
-        val snapshot = _state.value.snapshot ?: return
+    suspend fun updateRates(force: Boolean = false) = extra {
+        val snapshot = _state.value.snapshot ?: return@extra
         val currencies = snapshot.rateCurrencies
-        if (currencies.size < 2) return
+        if (currencies.size < 2) return@extra
         val zone = ZoneId.systemDefault()
         val first = offline.current()?.items?.minOfOrNull { it.instant }?.atZone(zone)?.toLocalDate()
         rates.update(currencies, first ?: LocalDate.now(zone).minusYears(1), force)
@@ -165,8 +174,8 @@ class Repository(
      * Downloads the prices of the securities in investment accounts, each back to its first transaction. Without
      * [force], recently downloaded ones are kept.
      */
-    suspend fun updatePrices(force: Boolean = false) {
-        val securities = _state.value.snapshot?.securities ?: return
+    suspend fun updatePrices(force: Boolean = false) = extra {
+        val securities = _state.value.snapshot?.securities ?: return@extra
         val zone = ZoneId.systemDefault()
         val fallback = LocalDate.now(zone).minusYears(1)
         val wanted = HashMap<String, LocalDate>()
@@ -178,13 +187,19 @@ class Repository(
         prices.update(wanted, force)
     }
 
-    private suspend fun syncIcons(connection: Connection, snapshot: Snapshot) {
-        // Icons are decoration: on failure the lists fall back to plain markers, and the next refresh picks up
-        // where this one stopped.
+    // Icons are decoration: on failure the lists fall back to plain markers, and the next refresh picks up
+    // where this one stopped.
+    private suspend fun syncIcons(connection: Connection, snapshot: Snapshot) = extra {
+        icons.sync(snapshot) { ids -> client.icons(connection, ids).icons }
+    }
+
+    /** Rates, prices and icons are extras: a failure keeps the older ones, and the next refresh tries again. */
+    private suspend fun extra(block: suspend () -> Unit) {
         try {
-            icons.sync(snapshot) { ids -> client.icons(connection, ids).icons }
-        } catch (_: UnreachableException) {
-        } catch (_: BridgeException) {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
     }
 
@@ -199,8 +214,12 @@ class Repository(
         return _state.value.pending.none { it.rejectedReason == null }
     }
 
+    /** Queues [request]; adding the same [NewTransactionRequest.clientId] again changes nothing. */
     suspend fun add(request: NewTransactionRequest) {
-        val pending = queue.update { it + PendingTransaction(request, System.currentTimeMillis()) }
+        val pending = queue.update { list ->
+            if (list.any { it.request.clientId == request.clientId }) list
+            else list + PendingTransaction(request, System.currentTimeMillis())
+        }
         _state.update { it.copy(pending = pending) }
         if (autoSync) scope.launch { refresh() }
     }

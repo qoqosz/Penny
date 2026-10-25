@@ -9,6 +9,7 @@ import app.penny.R
 import app.penny.data.DiscoveredBridge
 import app.penny.data.Discovery
 import app.penny.data.HiddenAccounts
+import app.penny.data.IncompatibleResponseException
 import app.penny.data.Kind
 import app.penny.data.NewTransactionRequest
 import app.penny.data.NotPairedException
@@ -38,6 +39,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.IOException
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalTime
@@ -50,6 +52,8 @@ fun Throwable.userMessage(): String = when (this) {
     is UnreachableException -> stringResource(R.string.error_unreachable)
     is NotPairedException -> stringResource(R.string.error_not_paired)
     is SearchUnavailableException -> stringResource(R.string.search_unavailable)
+    is IncompatibleResponseException -> stringResource(R.string.error_incompatible)
+    is IOException -> stringResource(R.string.error_storage)
     else -> message ?: toString()
 }
 
@@ -246,6 +250,8 @@ data class AddForm(
     val rate: String = "",
     val rateEdited: Boolean = false,
     @StringRes val error: Int? = null,
+    /** Saved and being queued: saving again does nothing (the buttons are off meanwhile). */
+    val saving: Boolean = false,
 ) {
     val kind: Kind get() = if (amount.startsWith('-')) Kind.EXPENSE else Kind.INCOME
     val parsedAmount: BigDecimal? get() = Format.parseAmount(amount.trimStart('+', '-'))
@@ -259,6 +265,8 @@ class AddTransactionViewModel(
 ) : ViewModel() {
     private val _form = MutableStateFlow(AddForm(accountId = initialAccountId ?: defaultAccount()))
     val form: StateFlow<AddForm> = _form.asStateFlow()
+    /** One per form, so however often it's saved, the queue and the Mac get one transaction. */
+    private val clientId = repository.newClientId()
 
     init {
         // Rates downloaded while the form is open fill in the rate.
@@ -366,6 +374,7 @@ class AddTransactionViewModel(
 
     fun save(onSaved: () -> Unit) {
         val form = _form.value
+        if (form.saving) return
         val amount = form.parsedAmount
         val rate = form.parsedRate
         val error = when {
@@ -384,7 +393,7 @@ class AddTransactionViewModel(
         // A transfer goes from one account to the other: with a plus, from the picked account into the form's.
         val transferIn = form.transferAccountId != null && form.kind == Kind.INCOME
         val request = NewTransactionRequest(
-            clientId = repository.newClientId(),
+            clientId = clientId,
             accountId = if (transferIn) form.transferAccountId!! else form.accountId!!,
             transferAccountId = if (transferIn) form.accountId else form.transferAccountId,
             date = ZonedDateTime.of(form.date, time, zone).toInstant().toString(),
@@ -396,8 +405,14 @@ class AddTransactionViewModel(
             currency = form.currency,
             exchangeRate = if (form.currency != null) rate?.toPlainString() else null,
         )
+        _form.update { it.copy(saving = true) }
         viewModelScope.launch {
-            repository.add(request)
+            try {
+                repository.add(request)
+            } catch (e: IOException) {
+                _form.update { it.copy(saving = false, error = R.string.error_storage) }
+                return@launch
+            }
             onSaved()
         }
     }

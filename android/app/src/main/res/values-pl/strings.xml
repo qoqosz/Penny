@@ -21,6 +21,8 @@
     <!-- Errors -->
     <string name="error_unreachable">Brak połączenia z Makiem. Sprawdź Wi-Fi i czy most działa.</string>
     <string name="error_not_paired">Nie sparowano z Makiem</string>
+    <string name="error_incompatible">Most na Macu odpowiedział w formacie, którego ta wersja Penny nie rozumie. Zaktualizuj Penny albo most.</string>
+    <string name="error_storage">Nie udało się zapisać danych Penny na telefonie. Sprawdź, czy jest wolne miejsce.</string>
     <string name="status_offline_cached">Mac niedostępny. Pokazuję ostatnio pobrane dane.</string>
     <string name="status_offline">Mac niedostępny. Sprawdź, czy telefon jest w tej samej sieci Wi-Fi.</string>
 

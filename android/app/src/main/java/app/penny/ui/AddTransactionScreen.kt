@@ -96,7 +96,7 @@ fun AddTransactionScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.add_title)) },
                 navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_cancel)) } },
-                actions = { TextButton(onClick = { vm.save(onDone) }, enabled = snapshot != null) {
+                actions = { TextButton(onClick = { vm.save(onDone) }, enabled = snapshot != null && !form.saving) {
                         Text(stringResource(R.string.action_save))
                     }
                 },
@@ -205,7 +205,7 @@ fun AddTransactionScreen(
 
             form.error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
 
-            Button(onClick = { vm.save(onDone) }, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { vm.save(onDone) }, enabled = !form.saving, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.action_save))
             }
             Text(

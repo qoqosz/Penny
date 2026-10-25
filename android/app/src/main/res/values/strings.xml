@@ -21,6 +21,8 @@
     <!-- Errors -->
     <string name="error_unreachable">Can\'t reach the Mac. Check Wi-Fi and that the bridge is running.</string>
     <string name="error_not_paired">Not paired with a Mac</string>
+    <string name="error_incompatible">The bridge on the Mac answered in a format this version of Penny doesn\'t understand. Update Penny or the bridge.</string>
+    <string name="error_storage">Couldn\'t save Penny\'s data on this phone. Check that there is free space.</string>
     <string name="status_offline_cached">Mac unavailable. Showing the last downloaded data.</string>
     <string name="status_offline">Mac unavailable. Make sure the phone is on the same Wi-Fi network.</string>
 

@@ -22,6 +22,9 @@ class UnreachableException(cause: Throwable) : Exception("Mac unreachable", caus
 
 class NotPairedException : Exception("Not paired with a Mac")
 
+/** The bridge answered with something this app can't read (e.g. a bridge newer or older than the app). */
+class IncompatibleResponseException(cause: Throwable) : Exception("Unexpected response from the bridge", cause)
+
 class BridgeClient(private val http: OkHttpClient = defaultHttp) {
 
     companion object {
@@ -89,7 +92,12 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
                     val error = runCatching { json.decodeFromString(ApiErrorBody.serializer(), text).error }.getOrNull()
                     throw BridgeException(it.code, error?.code ?: "http", error?.message ?: "HTTP ${it.code}")
                 }
-                json.decodeFromString<T>(text)
+                try {
+                    json.decodeFromString<T>(text)
+                } catch (e: IllegalArgumentException) {
+                    // SerializationException is an IllegalArgumentException: a missing field, a changed type, not JSON.
+                    throw IncompatibleResponseException(e)
+                }
             }
         }
 }

@@ -2,6 +2,7 @@ package app.penny
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.penny.data.AppPreferences
 import app.penny.data.BridgeClient
@@ -19,13 +20,17 @@ import app.penny.data.YahooPriceSource
 import app.penny.data.settingsDataStore
 import app.penny.lock.AppLock
 import app.penny.sync.SyncWorker
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import java.io.File
 
 class PennyApplication : Application() {
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // A failed background job is logged, never a crash; what the user needs to see goes to the sync status.
+    val appScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> Log.e("Penny", "Background job failed", e) },
+    )
 
     val settings by lazy { Settings(settingsDataStore, KeystoreTokenCipher()) }
     val preferences by lazy { AppPreferences(getSharedPreferences("preferences", Context.MODE_PRIVATE)) }

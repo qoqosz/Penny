@@ -4,6 +4,7 @@ import app.penny.data.BridgeClient
 import app.penny.data.BridgeException
 import app.penny.data.Connection
 import app.penny.data.HiddenAccounts
+import app.penny.data.IncompatibleResponseException
 import app.penny.data.NewTransactionRequest
 import app.penny.data.UnreachableException
 import app.penny.ui.Format
@@ -154,6 +155,15 @@ class BridgeClientTest {
         server.shutdown()
         val error = runCatching { client.snapshot(connection) }.exceptionOrNull()
         assertTrue(error is UnreachableException)
+    }
+
+    @Test fun `an answer the app can't read is reported, not thrown as a parsing error`() = runTest {
+        // A required field missing, a field of another type, and not JSON at all.
+        for (body in listOf("""{"generation":"g"}""", """{"generation":1,"bridgeVersion":"1","writesEnabled":"yes"}""", "<html>")) {
+            server.enqueue(MockResponse().setBody(body))
+            val error = runCatching { client.snapshot(connection) }.exceptionOrNull()
+            assertTrue("$body → $error", error is IncompatibleResponseException)
+        }
     }
 
     @Test fun `parses amounts typed by the user`() {
