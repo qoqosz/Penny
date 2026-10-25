@@ -102,6 +102,15 @@ with a throwaway key and has to replace a previous install (uninstall first).
 On first launch Penny looks for the Mac on the network (Bonjour). After choosing the Mac, run
 `penny-bridge pair` on it and enter the 6-digit code it shows on the phone.
 
+The connection is encrypted (HTTPS). The bridge makes its own certificate on first start, and the phone remembers
+(pins) it when pairing: from then on it talks only to a server presenting that certificate, so a device on the network
+posing as your Mac never gets the phone's access token. While pairing, the phone shows a short fingerprint of the
+certificate (e.g. `F417 9428 B5DD E3C8`); `penny-bridge pair` prints the same next to the code, so you can check the
+phone is really talking to your Mac. A phone paired with a bridge from before HTTPS moves to it on its own the first
+time it reaches a bridge that offers it, and stays on it. If you delete the bridge's `tls` folder (or reinstall it with
+its data), the certificate changes: the phone then shows that the Mac presented another certificate, and has to be
+paired again.
+
 ### Report
 
 The **Report** tab sums up a calendar month or year (switch between them at the top, arrows move between periods):
@@ -132,7 +141,8 @@ The settings screen (gear icon on the main screen) offers:
   (Android 11+). The app locks on start and after being in the background for the chosen time. After 5 wrong PINs, entry is
   blocked for a while, and the delay grows with further mistakes. A forgotten PIN can be reset, which disconnects the
   phone from the Mac and removes downloaded data (pending transactions are kept).
-- **Mac:** the connected bridge and disconnecting from it.
+- **Mac:** the connected bridge, whether the connection is encrypted (and the certificate's fingerprint), and
+  disconnecting from it. Disconnecting also removes the phone from the Mac's paired devices.
 
 ## Bridge commands
 
@@ -140,19 +150,21 @@ The settings screen (gear icon on the main screen) offers:
 |---|---|
 | `penny-bridge pair` | phone pairing code (valid for 10 min) |
 | `penny-bridge doctor [--verbose]` | diagnostics: database locations, detected conventions, balances |
-| `penny-bridge devices` / `revoke NAME` | paired devices |
+| `penny-bridge devices` / `revoke ID` | paired devices (ID, name, when paired and last seen); `revoke` also takes a name if only one device has it |
 | `penny-bridge install` / `uninstall` | LaunchAgent service |
 | `penny-bridge selftest` | write test on a throwaway database built from Money's model |
 | `penny-bridge demo DIR` | database with made-up data, for screenshots and trying the app |
 
-Configuration: `~/Library/Application Support/PennyBridge/config.json`, including `port`, `writesEnabled`
-(turns writing off), `launchMoneyAfterWrite` and `backupsToKeep` (the most backups kept, newest first, on top of the
-3-day/30-day rule; 60 by default, configurations written by earlier versions have 30).
+Configuration: `~/Library/Application Support/PennyBridge/config.json`, including `port` (plain HTTP, 8765),
+`tlsPort` (HTTPS, 8767; 0 turns it off), `writesEnabled` (turns writing off), `launchMoneyAfterWrite` and
+`backupsToKeep` (the most backups kept, newest first, on top of the 3-day/30-day rule; 60 by default, configurations
+written by earlier versions have 30). The HTTPS certificate and its key are in the `tls` folder next to it. Plain HTTP
+stays on for app versions from before HTTPS.
 
 ## Demo data
 
 `penny-bridge demo DIR` builds a database in Money's format with made-up accounts and four months of transactions
-(the screenshots above use it), plus a bridge configuration that serves it on port 8766 as "Penny Demo" without touching
+(the screenshots above use it), plus a bridge configuration that serves it on port 8766 (HTTPS on 8768) as "Penny Demo" without touching
 Money.app. It needs Money.app installed, for the data model.
 
 ```bash
@@ -167,7 +179,9 @@ Transactions added from the phone are written to the demo database.
 ## Limitations
 
 - The Mac has to be on and on the same network for the phone to fetch fresh data or send transactions.
-- Local network traffic is unencrypted (HTTP + token). Use it on a trusted home network.
+- The connection is encrypted only between the phone and a bridge that serves HTTPS (this version on both). With an
+  older bridge, or an older app, traffic goes over plain HTTP with the token, so use those on a trusted home network
+  only. Moving an existing pairing to HTTPS trusts the certificate the Mac presents at that moment, like pairing does.
 - Writing closes Money for a few seconds. When Money is frontmost (you're using it right now) or has an edit window
   open, the bridge defers the write and the phone retries later. This can be turned off with
   `deferWhileMoneyActive: false`.

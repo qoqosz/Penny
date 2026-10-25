@@ -31,8 +31,10 @@ data class PairedBridge(
     val host: String,
     val port: Int,
     val token: String,
+    /** The pinned HTTPS port and certificate; null for a pairing with a bridge from before HTTPS (moved over later). */
+    val tls: BridgeTls? = null,
 ) {
-    val connection get() = Connection(host, port, token)
+    val connection get() = Connection(host, port, token, tls)
 }
 
 /** The paired Mac. The token is stored encrypted with [cipher]; one saved in plain text by older versions is encrypted on first read. */
@@ -44,13 +46,15 @@ class Settings(private val store: DataStore<Preferences>, private val cipher: To
         /** Plain text, from versions before the token was encrypted. */
         val token = stringPreferencesKey("bridge_token")
         val encryptedToken = stringPreferencesKey("bridge_token_encrypted")
+        val tlsPort = intPreferencesKey("bridge_tls_port")
+        val fingerprint = stringPreferencesKey("bridge_fingerprint")
     }
 
     val bridge: Flow<PairedBridge?> = store.data.onStart { encryptPlainToken() }.map { p ->
         val host = p[Keys.host]
         val token = p[Keys.encryptedToken]?.let(cipher::decrypt) ?: p[Keys.token]
         if (host == null || token == null) null
-        else PairedBridge(p[Keys.name] ?: host, host, p[Keys.port] ?: 8765, token)
+        else PairedBridge(p[Keys.name] ?: host, host, p[Keys.port] ?: 8765, token, tls(p[Keys.tlsPort], p[Keys.fingerprint]))
     }
 
     suspend fun current(): PairedBridge? = bridge.first()
@@ -68,15 +72,36 @@ class Settings(private val store: DataStore<Preferences>, private val cipher: To
                 it[Keys.token] = bridge.token
                 it.remove(Keys.encryptedToken)
             }
+            val tls = bridge.tls
+            if (tls != null) {
+                it[Keys.tlsPort] = tls.port
+                it[Keys.fingerprint] = tls.fingerprint
+            } else {
+                it.remove(Keys.tlsPort)
+                it.remove(Keys.fingerprint)
+            }
         }
     }
 
-    suspend fun updateAddress(host: String, port: Int) {
+    suspend fun updateAddress(host: String, port: Int, tlsPort: Int? = null) {
         store.edit {
             it[Keys.host] = host
             it[Keys.port] = port
+            // Only a pinned pairing has an HTTPS port; the certificate stays the same.
+            if (tlsPort != null && it[Keys.fingerprint] != null) it[Keys.tlsPort] = tlsPort
         }
     }
+
+    /** Pins the bridge's certificate for a pairing made before the bridge had HTTPS. */
+    suspend fun pin(tls: BridgeTls) {
+        store.edit {
+            it[Keys.tlsPort] = tls.port
+            it[Keys.fingerprint] = tls.fingerprint
+        }
+    }
+
+    private fun tls(port: Int?, fingerprint: String?) =
+        if (port != null && fingerprint != null) BridgeTls(port, fingerprint) else null
 
     suspend fun clear() {
         store.edit { it.clear() }

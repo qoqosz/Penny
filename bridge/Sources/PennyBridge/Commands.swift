@@ -13,7 +13,7 @@ enum Commands {
           install      installs the bridge as a service that starts at login
           uninstall    removes the service
           devices      lists paired devices
-          revoke NAME  removes a paired device
+          revoke ID    removes a paired device (or by name, when only one has it)
           selftest     write test on a throwaway database (never touches Money's data)
           demo DIR     creates a database with made-up data (for screenshots and trying the app)
 
@@ -27,17 +27,25 @@ enum Commands {
         let config = BridgeConfig.load()
         let name = config.serviceName ?? defaultServiceName
         let api = API(config: config, serviceName: name, controlsMoneyApp: config.controlMoneyApp)
-        let server = try HTTPServer(port: UInt16(config.port), serviceName: name, handler: api.handle,
+        let work = DispatchQueue(label: "penny.http.work")
+        // HTTPS first, so the Bonjour record can point phones at it. Plain HTTP stays for apps from before HTTPS.
+        let tlsServer = config.tlsPort > 0 ? startTLSServer(api: api, port: UInt16(config.tlsPort), workQueue: work) : nil
+        let server = try HTTPServer(port: UInt16(config.port), serviceName: name,
+                                    txt: tlsServer.map { ["tls": "\($0.port)"] } ?? [:], workQueue: work, handler: api.handle,
                                     immediate: api.immediateResponse)
         try server.start()
         Log.info("penny-bridge \(bridgeVersion) listening on port \(server.port) as “\(name)”")
-        for address in localIPv4Addresses() { Log.info("  http://\(address):\(server.port)") }
+        for address in localIPv4Addresses() {
+            Log.info("  http://\(address):\(server.port)" + (tlsServer.map { ", https://\(address):\($0.port)" } ?? ""))
+        }
         // On SIGTERM (launchctl, logout, shutdown) or Ctrl-C, a write in progress finishes first, Money relaunch included.
         let stopSignals = [SIGTERM, SIGINT].map { number -> DispatchSourceSignal in
             signal(number, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
             source.setEventHandler {
                 Log.info("Stopping (signal \(number)) once the request in progress is done")
+                // Both servers share the work queue, so draining one waits for requests from either.
+                tlsServer?.stop()
                 server.drain {
                     Log.info("Stopped")
                     exit(0)
@@ -65,14 +73,34 @@ enum Commands {
         withExtendedLifetime(stopSignals) { RunLoop.main.run() }
     }
 
+    /// The HTTPS server with the bridge's certificate, or nil (logged) when it can't start; phones then use plain HTTP.
+    static func startTLSServer(api: API, port: UInt16, workQueue: DispatchQueue) -> HTTPServer? {
+        do {
+            let identity = try TLSIdentity.loadOrCreate()
+            let server = try HTTPServer(port: port, serviceName: nil, tls: identity.identity, workQueue: workQueue,
+                                        handler: api.handle, immediate: api.immediateResponse)
+            try server.start()
+            api.tls = (server.port, identity.fingerprint)
+            Log.info("HTTPS on port \(server.port), certificate \(identity.shortFingerprint)")
+            return server
+        } catch {
+            Log.warn("No HTTPS, phones connect over plain HTTP: \(error)")
+            return nil
+        }
+    }
+
     static func pair() throws {
         let code = try Auth.startPairing()
+        let config = BridgeConfig.load()
+        let fingerprint = config.tlsPort > 0 ? (try? TLSIdentity.loadOrCreate())?.shortFingerprint : nil
         print("""
 
         Pairing code:  \(code.prefix(3)) \(code.suffix(3))
+        """ + (fingerprint.map { "\nCertificate:   \($0)   (the phone shows the same when it's really talking to this Mac)" } ?? "") + """
+
 
         Enter it in the Penny app on the phone (valid for 10 minutes).
-        This Mac's addresses: \(localIPv4Addresses().joined(separator: ", ")), port \(BridgeConfig.load().port)
+        This Mac's addresses: \(localIPv4Addresses().joined(separator: ", ")), port \(config.port)
 
         """)
     }
@@ -80,11 +108,24 @@ enum Commands {
     static func devices() {
         let devices = Auth.devices()
         if devices.isEmpty { print("No paired devices.") }
-        for d in devices { print("• \(d.name) (since \(d.created.formatted()))") }
+        for d in devices {
+            let seen = d.lastSeen.map { "last seen \($0.formatted())" } ?? "never seen"
+            print("• \(d.id)  \(d.name) (paired \(d.created.formatted()), \(seen))")
+        }
     }
 
-    static func revoke(_ name: String) throws {
-        print("Devices removed: \(try Auth.revoke(name: name))")
+    static func revoke(_ idOrName: String) throws {
+        switch try Auth.revoke(idOrName) {
+        case .revoked(let device):
+            print("Removed \(device.name) (\(device.id)).")
+        case .ambiguous(let devices):
+            print("Several devices are named “\(idOrName)”, none removed. Revoke one by its ID:")
+            for d in devices { print("  penny-bridge revoke \(d.id)   (paired \(d.created.formatted()))") }
+            exit(1)
+        case .notFound:
+            print("No device with that ID or name. See: penny-bridge devices")
+            exit(1)
+        }
     }
 
     // MARK: - Diagnostics

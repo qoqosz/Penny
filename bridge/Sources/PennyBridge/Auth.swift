@@ -5,9 +5,31 @@ import Foundation
 /// Only SHA-256 hashes of codes and tokens are stored on disk.
 enum Auth {
     struct Device: Codable {
+        /// Random and short, for `penny-bridge revoke` (names repeat: two phones of the same model).
+        var id: String
         var name: String
         var tokenHash: String
         var created: Date
+        /// The last authenticated request, updated at most every [lastSeenInterval].
+        var lastSeen: Date?
+
+        init(id: String, name: String, tokenHash: String, created: Date, lastSeen: Date? = nil) {
+            self.id = id
+            self.name = name
+            self.tokenHash = tokenHash
+            self.created = created
+            self.lastSeen = lastSeen
+        }
+
+        /// Entries written before devices had IDs get one on the next read (see [devices]).
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+            name = try c.decode(String.self, forKey: .name)
+            tokenHash = try c.decode(String.self, forKey: .tokenHash)
+            created = try c.decode(Date.self, forKey: .created)
+            lastSeen = try c.decodeIfPresent(Date.self, forKey: .lastSeen)
+        }
     }
 
     struct Pairing: Codable {
@@ -16,10 +38,24 @@ enum Auth {
         var attemptsLeft: Int
     }
 
+    enum RevokeResult {
+        case revoked(Device)
+        /// Several devices have that name; none was removed.
+        case ambiguous([Device])
+        case notFound
+    }
+
+    /// devices.json isn't rewritten on every request just to note that a device was seen.
+    static let lastSeenInterval: TimeInterval = 3600
+
     private static let lock = NSLock()
 
     static func hash(_ s: String) -> String {
         SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func newDeviceID() -> String {
+        (0..<6).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
     }
 
     static func startPairing(validFor seconds: TimeInterval = 600) throws -> String {
@@ -52,8 +88,10 @@ enum Auth {
         let token = Data(bytes).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
-        var devices = JSONFile.read([Device].self, from: Paths.devices) ?? []
-        devices.append(Device(name: String(deviceName.prefix(100)), tokenHash: hash(token), created: Date()))
+        var devices = readDevices()
+        let now = Date()
+        devices.append(Device(id: newDeviceID(), name: String(deviceName.prefix(100)), tokenHash: hash(token),
+                              created: now, lastSeen: now))
         try JSONFile.write(devices, to: Paths.devices)
         Log.info("Paired device “\(deviceName)”")
         return token
@@ -62,18 +100,50 @@ enum Auth {
     static func device(forAuthorizationHeader header: String?) -> Device? {
         guard let header, header.hasPrefix("Bearer ") else { return nil }
         let tokenHash = hash(String(header.dropFirst("Bearer ".count)))
-        let devices = JSONFile.read([Device].self, from: Paths.devices) ?? []
-        return devices.first { constantTimeEquals($0.tokenHash, tokenHash) }
+        return devices().first { constantTimeEquals($0.tokenHash, tokenHash) }
     }
 
-    static func devices() -> [Device] { JSONFile.read([Device].self, from: Paths.devices) ?? [] }
+    /// Notes an authenticated request from [device], at most every [lastSeenInterval].
+    static func noteSeen(_ device: Device, at now: Date = Date()) {
+        if let seen = device.lastSeen, now.timeIntervalSince(seen) < lastSeenInterval { return }
+        lock.lock()
+        defer { lock.unlock() }
+        var devices = readDevices()
+        guard let index = devices.firstIndex(where: { $0.id == device.id }) else { return }
+        devices[index].lastSeen = now
+        try? JSONFile.write(devices, to: Paths.devices)
+    }
 
-    static func revoke(name: String) throws -> Int {
-        var devices = self.devices()
-        let before = devices.count
-        devices.removeAll { $0.name == name }
+    /// The paired devices. Entries from before devices had IDs get one here, saved so it stays the same.
+    static func devices() -> [Device] {
+        lock.lock()
+        defer { lock.unlock() }
+        return readDevices()
+    }
+
+    /// Removes the device with this ID, or else the only one with this name.
+    static func revoke(_ idOrName: String) throws -> RevokeResult {
+        lock.lock()
+        defer { lock.unlock() }
+        var devices = readDevices()
+        let matches = devices.contains { $0.id == idOrName } ? devices.filter { $0.id == idOrName }
+            : devices.filter { $0.name == idOrName }
+        guard let device = matches.first else { return .notFound }
+        guard matches.count == 1 else { return .ambiguous(matches) }
+        devices.removeAll { $0.id == device.id }
         try JSONFile.write(devices, to: Paths.devices)
-        return before - devices.count
+        Log.info("Revoked device “\(device.name)” (\(device.id))")
+        return .revoked(device)
+    }
+
+    /// Call with [lock] held.
+    private static func readDevices() -> [Device] {
+        var devices = JSONFile.read([Device].self, from: Paths.devices) ?? []
+        if devices.contains(where: { $0.id.isEmpty }) {
+            for i in devices.indices where devices[i].id.isEmpty { devices[i].id = newDeviceID() }
+            try? JSONFile.write(devices, to: Paths.devices)
+        }
+        return devices
     }
 
     private static func constantTimeEquals(_ a: String, _ b: String) -> Bool {

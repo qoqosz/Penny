@@ -115,6 +115,8 @@ class RepositoryTest {
     @Test fun `an answer the app can't read ends the refresh with a status instead of a crash`() = runTest {
         val settings = Settings(dataStore(backgroundScope), FakeCipher)
         settings.save(PairedBridge("Mac", server.hostName, server.port, "secret"))
+        // The unpinned pairing first asks whether the bridge offers HTTPS (this one doesn't).
+        server.enqueue(MockResponse().setBody("""{"app":"penny-bridge","name":"Mac","version":"1.0.0"}"""))
         server.enqueue(MockResponse().setBody("""{"generation":"g1"}"""))
         val repository = repository(settings)
 

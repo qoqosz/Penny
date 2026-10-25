@@ -30,6 +30,8 @@ sealed interface SyncStatus {
     data class Error(val message: String) : SyncStatus
     /** Something on the phone's side: an answer it can't read, storage that can't be written. */
     data class Failed(val error: Throwable) : SyncStatus
+    /** The Mac's address answered with another certificate than the pinned one (see [UntrustedBridgeException]). */
+    data object Untrusted : SyncStatus
 }
 
 data class AppState(
@@ -94,9 +96,10 @@ class Repository(
         }
     }
 
+    /** With [DiscoveredBridge.tls] (see [identify]), over HTTPS to that certificate only, which stays pinned. */
     suspend fun pair(bridge: DiscoveredBridge, code: String, deviceName: String) {
-        val response = client.pair(bridge.host, bridge.port, code.filter(Char::isDigit), deviceName)
-        settings.save(PairedBridge(response.name, bridge.host, bridge.port, response.token))
+        val response = client.pair(bridge.host, bridge.port, bridge.tls, code.filter(Char::isDigit), deviceName)
+        settings.save(PairedBridge(response.name, bridge.host, bridge.port, response.token, bridge.tls))
         cache.clear()
         offline.clear()
         icons.clear()
@@ -106,10 +109,21 @@ class Repository(
 
     suspend fun probe(host: String, port: Int): DiscoveredBridge {
         val ping = client.ping(host, port)
-        return DiscoveredBridge(ping.name, host, port)
+        return DiscoveredBridge(ping.name, host, port, ping.tlsPort)
+    }
+
+    /**
+     * Before pairing: whether the bridge serves HTTPS and which certificate it presents. That one is trusted on first
+     * use and pinned; the user compares its short form with what `penny-bridge pair` prints on the Mac.
+     */
+    suspend fun identify(bridge: DiscoveredBridge): DiscoveredBridge {
+        val tlsPort = bridge.tlsPort ?: client.ping(bridge.host, bridge.port).tlsPort ?: return bridge.copy(tls = null)
+        return bridge.copy(tlsPort = tlsPort, tls = BridgeTls(tlsPort, client.certificate(bridge.host, tlsPort)))
     }
 
     suspend fun unpair() {
+        // The Mac forgets the token, as far as it can be told: unreachable or too old (404), unpairing goes on anyway.
+        settings.current()?.let { client.revokeDevice(it.connection) }
         settings.clear()
         cache.clear()
         offline.clear()
@@ -124,7 +138,7 @@ class Repository(
      * and the offline copy of transactions.
      */
     suspend fun refresh(push: Boolean = autoSync) = syncMutex.withLock {
-        val bridge = settings.current() ?: return@withLock
+        val bridge = settings.current()?.let { pinIfOffered(it) } ?: return@withLock
         _state.update { it.copy(status = SyncStatus.Syncing) }
         val status = try {
             val connection = withReconnect(bridge) { c -> if (push) pushPending(c); c }
@@ -146,6 +160,8 @@ class Repository(
             SyncStatus.Offline(hasCachedData = _state.value.snapshot != null)
         } catch (e: BridgeException) {
             SyncStatus.Error(e.message.orEmpty())
+        } catch (e: UntrustedBridgeException) {
+            SyncStatus.Untrusted
         } catch (e: CancellationException) {
             _state.update { it.copy(status = SyncStatus.Idle) }
             throw e
@@ -329,14 +345,42 @@ class Repository(
         _state.update { s -> s.copy(pending = s.pending.map { if (it.request.clientId == id) failed else it }) }
     }
 
-    /** Runs [block]; if the Mac is unreachable, looks it up again over Bonjour (new IP) and retries once. */
+    /** When the last check that a pairing from before HTTPS could move to it ran (see [pinIfOffered]). */
+    private var tlsCheckedAt = 0L
+
+    /**
+     * A pairing with a bridge from before HTTPS moves to it once the bridge offers it: the certificate the Mac presents
+     * then is trusted on first use and pinned, and from then on the phone never talks to it over plain HTTP. Checked at
+     * most hourly; on any failure it stays as it was until the next check.
+     */
+    private suspend fun pinIfOffered(bridge: PairedBridge): PairedBridge {
+        if (bridge.tls != null || System.currentTimeMillis() - tlsCheckedAt < TLS_CHECK_INTERVAL_MS) return bridge
+        tlsCheckedAt = System.currentTimeMillis()
+        return try {
+            val tlsPort = client.ping(bridge.host, bridge.port).tlsPort ?: return bridge
+            val tls = BridgeTls(tlsPort, client.certificate(bridge.host, tlsPort))
+            settings.pin(tls)
+            bridge.copy(tls = tls)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            bridge
+        }
+    }
+
+    /**
+     * Runs [block]; if the Mac is unreachable, looks it up again over Bonjour (new IP) and retries once. The new address
+     * is kept only when it works: for a pinned pairing that means it presented the pinned certificate, so a device
+     * posing as the Mac under its Bonjour name never gets the token.
+     */
     private suspend fun <T> withReconnect(bridge: PairedBridge, block: suspend (Connection) -> T): T = try {
         block(bridge.connection)
     } catch (e: UnreachableException) {
         val found = discovery.find(bridge.name) ?: throw e
-        if (found.host == bridge.host && found.port == bridge.port) throw e
-        settings.updateAddress(found.host, found.port)
-        block(bridge.copy(host = found.host, port = found.port).connection)
+        val moved = bridge.copy(host = found.host, port = found.port,
+            tls = bridge.tls?.let { it.copy(port = found.tlsPort ?: it.port) })
+        if (moved == bridge) throw e
+        block(moved.connection).also { settings.updateAddress(moved.host, moved.port, moved.tls?.port) }
     }
 
     companion object {
@@ -344,5 +388,6 @@ class Repository(
         /** The bridge takes at most 100 transactions per batch. */
         private const val BATCH_SIZE = 100
         private const val SNAPSHOT_FILE = "snapshot.json"
+        private const val TLS_CHECK_INTERVAL_MS = 60 * 60 * 1000L
     }
 }

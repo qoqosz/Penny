@@ -80,6 +80,7 @@ fun StatusBanner(status: SyncStatus) {
         )
         is SyncStatus.Error -> Triple(Icons.Outlined.ErrorOutline, status.message, MaterialTheme.colorScheme.errorContainer)
         is SyncStatus.Failed -> Triple(Icons.Outlined.ErrorOutline, status.error.userMessage(), MaterialTheme.colorScheme.errorContainer)
+        SyncStatus.Untrusted -> Triple(Icons.Outlined.ErrorOutline, stringResource(R.string.error_untrusted), MaterialTheme.colorScheme.errorContainer)
         else -> return
     }
     Surface(color = color, modifier = Modifier.fillMaxWidth()) {

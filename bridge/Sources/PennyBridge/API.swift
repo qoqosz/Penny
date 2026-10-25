@@ -33,6 +33,8 @@ final class API {
     private var snapshot: MoneySnapshot?
     private var encodedSnapshot: (fileGeneration: String, body: Data, etag: String)?
     private let iconRenderer = IconRenderer()
+    /// Set once the HTTPS server is listening; `ping` tells phones about it.
+    var tls: (port: UInt16, fingerprint: String)?
 
     init(config: BridgeConfig, serviceName: String, location: MoneyLocation? = nil, controlsMoneyApp: Bool = true) {
         self.config = config
@@ -62,8 +64,15 @@ final class API {
     }
 
     private func ping() throws -> HTTPResponse {
-        struct Ping: Encodable { let app = "penny-bridge"; let name: String; let version: String }
-        return try .json(Ping(name: serviceName, version: bridgeVersion))
+        struct Ping: Encodable {
+            let app = "penny-bridge"
+            let name: String
+            let version: String
+            /// HTTPS port and the certificate's SHA-256, when the bridge serves HTTPS (phones pin it when pairing).
+            let tlsPort: UInt16?
+            let fingerprint: String?
+        }
+        return try .json(Ping(name: serviceName, version: bridgeVersion, tlsPort: tls?.port, fingerprint: tls?.fingerprint))
     }
 
     private func route(_ request: HTTPRequest) throws -> HTTPResponse {
@@ -80,11 +89,17 @@ final class API {
             break
         }
 
-        guard Auth.device(forAuthorizationHeader: request.header("authorization")) != nil else {
+        guard let device = Auth.device(forAuthorizationHeader: request.header("authorization")) else {
             throw BridgeError.unauthorized()
         }
+        Auth.noteSeen(device)
 
         switch (request.method, request.path) {
+        case ("DELETE", "/api/v1/device"):
+            // The phone unpairs: its token stops working.
+            struct Revoked: Encodable { let revoked = true }
+            _ = try Auth.revoke(device.id)
+            return try .json(Revoked())
         case ("GET", "/api/v1/status"):
             return try .json(try status())
         case ("GET", "/api/v1/snapshot"):

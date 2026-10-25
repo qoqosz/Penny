@@ -35,6 +35,7 @@ enum DemoData {
         syncStore.close()
 
         config.port = 8766
+        config.tlsPort = 8768
         config.serviceName = "Penny Demo"
         config.moneyStorePath = storeURL.path
         config.syncStorePath = syncStoreURL.path

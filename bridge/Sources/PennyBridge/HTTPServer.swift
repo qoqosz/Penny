@@ -113,23 +113,36 @@ final class HTTPServer {
 
     private let listener: NWListener
     private let ioQueue = DispatchQueue(label: "penny.http.io")
-    /// Requests are handled one at a time: the Money store is never accessed concurrently.
-    private let workQueue = DispatchQueue(label: "penny.http.work")
+    /// Requests are handled one at a time: the Money store is never accessed concurrently. The HTTP and HTTPS servers
+    /// share one queue.
+    private let workQueue: DispatchQueue
     private let handler: (HTTPRequest) -> HTTPResponse
     /// Answers what it can right away on the I/O queue (nil for the rest), so a ping doesn't wait behind a write.
     /// It must not touch anything the work queue does.
     private let immediate: ((HTTPRequest) -> HTTPResponse?)?
     private(set) var port: UInt16 = 0
 
-    init(port: UInt16, serviceName: String?, handler: @escaping (HTTPRequest) -> HTTPResponse,
+    /// With [tls], the server speaks HTTPS with that identity. [txt] adds to the Bonjour TXT record.
+    init(port: UInt16, serviceName: String?, txt: [String: String] = [:], tls: sec_identity_t? = nil,
+         workQueue: DispatchQueue = DispatchQueue(label: "penny.http.work"),
+         handler: @escaping (HTTPRequest) -> HTTPResponse,
          immediate: ((HTTPRequest) -> HTTPResponse?)? = nil) throws {
-        let parameters = NWParameters.tcp
+        let parameters: NWParameters
+        if let tls {
+            let options = NWProtocolTLS.Options()
+            sec_protocol_options_set_local_identity(options.securityProtocolOptions, tls)
+            sec_protocol_options_set_min_tls_protocol_version(options.securityProtocolOptions, .TLSv12)
+            parameters = NWParameters(tls: options, tcp: NWProtocolTCP.Options())
+        } else {
+            parameters = .tcp
+        }
         parameters.allowLocalEndpointReuse = true
         listener = try NWListener(using: parameters, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
         if let serviceName {
-            let txt = NWTXTRecord(["version": bridgeVersion, "api": "1"])
-            listener.service = NWListener.Service(name: serviceName, type: Self.bonjourType, domain: nil, txtRecord: txt)
+            let record = NWTXTRecord(["version": bridgeVersion, "api": "1"].merging(txt) { $1 })
+            listener.service = NWListener.Service(name: serviceName, type: Self.bonjourType, domain: nil, txtRecord: record)
         }
+        self.workQueue = workQueue
         self.handler = handler
         self.immediate = immediate
     }
