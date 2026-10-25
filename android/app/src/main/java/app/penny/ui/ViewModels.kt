@@ -22,6 +22,7 @@ import app.penny.data.TransactionPage
 import app.penny.data.TransactionSearch
 import app.penny.data.SearchUnavailableException
 import app.penny.data.UnreachableException
+import app.penny.data.UntrustedBridgeException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -50,6 +51,7 @@ fun Throwable.userMessage(): String = when (this) {
     is UnreachableException -> stringResource(R.string.error_unreachable)
     is NotPairedException -> stringResource(R.string.error_not_paired)
     is SearchUnavailableException -> stringResource(R.string.search_unavailable)
+    is UntrustedBridgeException -> stringResource(R.string.error_untrusted)
     else -> message ?: toString()
 }
 
@@ -191,6 +193,8 @@ class ReportViewModel(private val repository: Repository, hiddenAccounts: StateF
 
 data class SetupState(
     val selected: DiscoveredBridge? = null,
+    /** [selected] was checked for HTTPS ([Repository.identify]), so its [DiscoveredBridge.tls] is what pairing uses. */
+    val identified: Boolean = false,
     val busy: Boolean = false,
     val error: Throwable? = null,
 )
@@ -202,14 +206,29 @@ class SetupViewModel(private val repository: Repository, discovery: Discovery) :
     private val _state = MutableStateFlow(SetupState())
     val state: StateFlow<SetupState> = _state.asStateFlow()
 
-    fun select(bridge: DiscoveredBridge?) = _state.update { it.copy(selected = bridge, error = null) }
+    fun select(bridge: DiscoveredBridge?) {
+        _state.update { it.copy(selected = bridge, identified = false, error = null) }
+        if (bridge != null) launchBusy { identify(bridge) }
+    }
 
     fun connectManually(host: String, port: Int) = launchBusy {
-        repository.probe(host.trim(), port).also { b -> _state.update { it.copy(selected = b) } }
+        val bridge = repository.probe(host.trim(), port)
+        _state.update { it.copy(selected = bridge, identified = false) }
+        identify(bridge)
+    }
+
+    /** Fetches the certificate the bridge presents, for the user to compare with the Mac's before pairing. */
+    private suspend fun identify(bridge: DiscoveredBridge): DiscoveredBridge {
+        val identified = repository.identify(bridge)
+        _state.update { if (it.selected == bridge) it.copy(selected = identified, identified = true) else it }
+        return identified
     }
 
     fun pair(code: String, deviceName: String, onDone: () -> Unit) = launchBusy {
-        val bridge = _state.value.selected ?: return@launchBusy
+        val state = _state.value
+        val selected = state.selected ?: return@launchBusy
+        // Never over plain HTTP to a bridge that offers HTTPS: check first if that didn't work out earlier.
+        val bridge = if (state.identified) selected else identify(selected)
         repository.pair(bridge, code, deviceName)
         onDone()
     }

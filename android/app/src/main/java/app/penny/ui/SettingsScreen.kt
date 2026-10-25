@@ -221,7 +221,11 @@ fun SettingsScreen(
             val paired = bridge
             SettingRow(
                 title = paired?.name ?: stringResource(R.string.mac_not_paired),
-                subtitle = paired?.let { "${it.host}:${it.port}" },
+                subtitle = paired?.let {
+                    val connection = it.tls?.let { tls -> stringResource(R.string.mac_encrypted, tls.shortFingerprint) }
+                        ?: stringResource(R.string.mac_not_encrypted)
+                    "${it.host}:${it.port} · $connection"
+                },
             )
             SettingRow(
                 title = stringResource(R.string.sync_mode),

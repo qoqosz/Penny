@@ -199,6 +199,13 @@
     <string name="setup_code_instructions">Na Macu uruchom w Terminalu:  penny-bridge pair\ni wpisz pokazany kod (6 cyfr, np. 123 456).</string>
     <string name="setup_code">Kod</string>
     <string name="setup_pair">Sparuj</string>
+    <string name="setup_checking">Sprawdzanie certyfikatu Maca…</string>
+    <string name="setup_certificate_title">Certyfikat</string>
+    <string name="setup_certificate_hint">Mac pokazuje to samo obok kodu parowania. Jeśli się zgadza, połączenie jest szyfrowane i telefonowi odpowiada tylko ten Mac.</string>
+    <string name="setup_no_tls">Ten most nie szyfruje połączenia. Zaktualizuj penny-bridge na Macu, żeby sparować bezpiecznie.</string>
+    <string name="error_untrusted">Mac przedstawił inny certyfikat niż przy parowaniu. Jeśli most był instalowany od nowa, sparuj telefon ponownie; jeśli nie, inne urządzenie może podszywać się pod Twojego Maca.</string>
+    <string name="mac_encrypted">szyfrowane, certyfikat %1$s</string>
+    <string name="mac_not_encrypted">bez szyfrowania</string>
 
     <!-- Settings -->
     <string name="settings">Ustawienia</string>

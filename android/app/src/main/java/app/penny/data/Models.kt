@@ -272,8 +272,19 @@ data class PairRequest(val code: String, val deviceName: String)
 @Serializable
 data class PairResponse(val token: String, val name: String)
 
+/** [tlsPort] and [fingerprint] (the certificate's SHA-256) when the bridge also serves HTTPS. */
 @Serializable
-data class Ping(val app: String, val name: String, val version: String)
+data class Ping(
+    val app: String,
+    val name: String,
+    val version: String,
+    val tlsPort: Int? = null,
+    val fingerprint: String? = null,
+)
+
+/** `DELETE device`. */
+@Serializable
+data class Revoked(val revoked: Boolean = false)
 
 @Serializable
 data class ApiErrorBody(val error: ApiErrorInner)

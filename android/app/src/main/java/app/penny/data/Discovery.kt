@@ -15,7 +15,17 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.Inet4Address
 
-data class DiscoveredBridge(val name: String, val host: String, val port: Int)
+/**
+ * [tlsPort] comes from the Bonjour record of bridges that serve HTTPS; [tls] is filled in before pairing, with the
+ * certificate the bridge presented (see [Repository.identify]).
+ */
+data class DiscoveredBridge(
+    val name: String,
+    val host: String,
+    val port: Int,
+    val tlsPort: Int? = null,
+    val tls: BridgeTls? = null,
+)
 
 /** Finds penny-bridge instances advertised over Bonjour (`_penny._tcp`) on the local network. */
 class Discovery(context: Context) {
@@ -75,7 +85,8 @@ class Discovery(context: Context) {
         val resolved = withTimeoutOrNull(5000) { result.await() } ?: return null
         val address = resolved.host ?: return null
         val host = if (address is Inet4Address) address.hostAddress else "[${address.hostAddress}]"
-        DiscoveredBridge(resolved.serviceName, host ?: return null, resolved.port)
+        val tlsPort = resolved.attributes["tls"]?.let { String(it, Charsets.UTF_8).toIntOrNull() }
+        DiscoveredBridge(resolved.serviceName, host ?: return null, resolved.port, tlsPort)
     }
 
     companion object {

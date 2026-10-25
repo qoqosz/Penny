@@ -194,6 +194,13 @@
     <string name="setup_code">Code</string>
     <string name="setup_code_placeholder" translatable="false">000 000</string>
     <string name="setup_pair">Pair</string>
+    <string name="setup_checking">Checking the Mac\'s certificate…</string>
+    <string name="setup_certificate_title">Certificate</string>
+    <string name="setup_certificate_hint">The Mac shows the same next to the pairing code. If it matches, the connection is encrypted and only this Mac can answer the phone.</string>
+    <string name="setup_no_tls">This bridge doesn\'t encrypt the connection. Update penny-bridge on the Mac to pair securely.</string>
+    <string name="error_untrusted">The Mac presented a different certificate than when you paired. If you reinstalled the bridge, pair the phone again; if not, another device may be posing as your Mac.</string>
+    <string name="mac_encrypted">encrypted, certificate %1$s</string>
+    <string name="mac_not_encrypted">not encrypted</string>
 
     <!-- Settings -->
     <string name="settings">Settings</string>

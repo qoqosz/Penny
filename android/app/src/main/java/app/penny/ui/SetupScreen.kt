@@ -54,6 +54,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
+import app.penny.data.BridgeTls
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,10 +113,33 @@ fun SetupScreen(vm: SetupViewModel, onPaired: () -> Unit, onOpenSettings: () -> 
                         trailing = { TextButton(onClick = { vm.select(null) }) { Text(stringResource(R.string.setup_change)) } },
                     )
                 }
+                val tls = selected.tls
+                when {
+                    tls != null -> Certificate(tls)
+                    state.identified -> Text(stringResource(R.string.setup_no_tls), color = MaterialTheme.colorScheme.error)
+                    state.busy -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.setup_checking), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 PairingCode(busy = state.busy) { code -> vm.pair(code, deviceName(), onPaired) }
             }
             state.error?.let { Text(it.userMessage(), color = MaterialTheme.colorScheme.error) }
         }
+    }
+}
+
+/** The certificate the bridge presented, to compare with what `penny-bridge pair` prints on the Mac. */
+@Composable
+private fun Certificate(tls: BridgeTls) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(stringResource(R.string.setup_certificate_title), style = MaterialTheme.typography.titleMedium)
+        Text(tls.shortFingerprint, style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace))
+        Text(
+            stringResource(R.string.setup_certificate_hint),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
