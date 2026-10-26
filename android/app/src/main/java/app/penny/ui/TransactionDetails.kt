@@ -29,13 +29,21 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.CurrencyExchange
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.Numbers
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -53,6 +61,8 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -67,6 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
+import app.penny.data.CloudStatus
 import app.penny.data.Investment
 import app.penny.data.Location
 import app.penny.data.Repository
@@ -74,6 +85,7 @@ import app.penny.data.Snapshot
 import app.penny.data.Split
 import app.penny.data.Tag
 import app.penny.data.Transaction
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
@@ -114,9 +126,15 @@ fun TransactionDetailsSheet(
     repository: Repository,
     onSelect: (Transaction) -> Unit,
     onDismiss: () -> Unit,
+    /** Opens the edit form; null leaves out Edit and Delete. */
+    onEdit: ((EditTarget) -> Unit)? = null,
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
     val snapshot = app.snapshot
+    val scope = rememberCoroutineScope()
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    // Only the phone's own transactions, and not while a change or deletion of it waits (that one is edited instead).
+    val editable = onEdit != null && tx.editable && snapshot?.writesEdits == true && snapshot.writesEnabled && tx.id !in app.replaced
     val scroll = rememberScrollState()
     LaunchedEffect(tx.id) { scroll.animateScrollTo(0) }
     var showAll by rememberSaveable { mutableStateOf(false) }
@@ -138,11 +156,44 @@ fun TransactionDetailsSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Header(tx, snapshot, repository)
-            DetailsCard(tx, snapshot, repository)
+            if (editable) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+                    FilledTonalButton(onClick = {
+                        repository.keep(tx)
+                        onDismiss()
+                        onEdit?.invoke(EditTarget.Saved(tx.id))
+                    }) {
+                        Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.action_edit))
+                    }
+                    FilledTonalButton(onClick = { confirmDelete = true }) {
+                        Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text(stringResource(R.string.action_delete))
+                    }
+                }
+            }
+            DetailsCard(tx, snapshot, repository, app.cloud)
             if (tx.splits.size > 1) SplitsCard(tx, snapshot, repository)
             val others = history.filter { it.id != tx.id }
             if (others.isNotEmpty()) PayeeHistoryCard(tx, others, snapshot, onSelect, onShowAll = { showAll = true })
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(stringResource(R.string.delete_title)) },
+            text = { Text(stringResource(if (tx.sides.size > 1) R.string.delete_transfer_text else R.string.delete_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    scope.launch { repository.delete(tx) }
+                    onDismiss()
+                }) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
     }
     if (showAll && history.isNotEmpty()) {
         PayeeTransactionsSheet(
@@ -203,7 +254,7 @@ private fun TagChip(tag: Tag) {
 }
 
 @Composable
-private fun DetailsCard(tx: Transaction, snapshot: Snapshot?, repository: Repository) {
+private fun DetailsCard(tx: Transaction, snapshot: Snapshot?, repository: Repository, cloud: CloudStatus?) {
     val context = LocalContext.current
     val account = snapshot?.accounts?.firstOrNull { it.id == tx.accountId }
     val split = tx.splits.singleOrNull()
@@ -270,6 +321,17 @@ private fun DetailsCard(tx: Transaction, snapshot: Snapshot?, repository: Reposi
                     }
                 },
             )
+        }
+        // Whether Money on the Mac has sent it to iCloud: shown while it hasn't, and for the phone's own once it has.
+        val waiting = cloud?.waiting(tx.id)
+        if (waiting != null) {
+            val since = waiting.sinceInstant?.let { Format.dateTime(it) } ?: "?"
+            DetailItem(
+                Icons.Outlined.CloudUpload, stringResource(R.string.details_icloud),
+                stringResource(if (cloud.moneyRunning) R.string.details_icloud_waiting else R.string.details_icloud_stopped, since),
+            )
+        } else if (cloud != null && tx.editable) {
+            DetailItem(Icons.Outlined.CloudDone, stringResource(R.string.details_icloud), stringResource(R.string.details_icloud_done))
         }
     }
 }

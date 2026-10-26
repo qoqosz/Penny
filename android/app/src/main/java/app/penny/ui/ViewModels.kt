@@ -11,8 +11,10 @@ import app.penny.data.Discovery
 import app.penny.data.HiddenAccounts
 import app.penny.data.IncompatibleResponseException
 import app.penny.data.Kind
+import app.penny.data.LastAccount
 import app.penny.data.NewTransactionRequest
 import app.penny.data.NotPairedException
+import app.penny.data.PendingChange
 import app.penny.data.PeriodType
 import app.penny.data.Report
 import app.penny.data.ReportPeriod
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -271,25 +274,92 @@ data class AddForm(
     @StringRes val error: Int? = null,
     /** Saved and being queued: saving again does nothing (the buttons are off meanwhile). */
     val saving: Boolean = false,
+    /** False while an edited transaction is being loaded (or wasn't found): nothing to save yet. */
+    val ready: Boolean = true,
+    /**
+     * For an edit of a transaction the Mac has: true when it must stay a transfer, false when it can't become one (the
+     * Mac can't turn one into the other). Null for a new transaction.
+     */
+    val transferLock: Boolean? = null,
 ) {
     val kind: Kind get() = if (amount.startsWith('-')) Kind.EXPENSE else Kind.INCOME
     val parsedAmount: BigDecimal? get() = Format.parseAmount(amount.trimStart('+', '-'))
     val parsedRate: BigDecimal? get() = Format.parseRate(rate)
 }
 
+/** What the add form changes instead of adding a transaction. */
+sealed interface EditTarget {
+    /** A transaction the Mac has, by ID (one that is [app.penny.data.Transaction.editable]). */
+    data class Saved(val transactionId: String) : EditTarget
+
+    /** A queued transaction or change, by its clientId. */
+    data class Queued(val clientId: String) : EditTarget
+}
+
+/** The add form, or with [editing] the same form for changing a transaction. */
 class AddTransactionViewModel(
     private val repository: Repository,
     private val hiddenAccounts: StateFlow<HiddenAccounts>,
     initialAccountId: String?,
+    /** Where the account of the last added transaction is kept, for the next form. */
+    private val lastAccount: LastAccount? = null,
+    private val editing: EditTarget? = null,
 ) : ViewModel() {
-    private val _form = MutableStateFlow(AddForm(accountId = initialAccountId ?: defaultAccount()))
+    private val _form = MutableStateFlow(
+        if (editing == null) AddForm(accountId = initialAccountId ?: defaultAccount()) else AddForm(ready = false)
+    )
     val form: StateFlow<AddForm> = _form.asStateFlow()
-    /** One per form, so however often it's saved, the queue and the Mac get one transaction. */
+    /** One per form, so however often it's saved, the queue and the Mac get one transaction (or one change). */
     private val clientId = repository.newClientId()
+    /** The edited transaction of the Mac's ([EditTarget.Saved]). */
+    private var original: Transaction? = null
+    /** The edited transaction's date and time: kept as long as the day isn't changed. */
+    private var originalDate: String? = null
+
+    val isEdit: Boolean get() = editing != null
 
     init {
         // Rates downloaded while the form is open fill in the rate.
         viewModelScope.launch { repository.rates.state.collect { _form.update(::withSuggestedRate) } }
+        if (editing != null) viewModelScope.launch { load(editing) }
+    }
+
+    private suspend fun load(target: EditTarget) {
+        val loaded = when (target) {
+            is EditTarget.Saved -> repository.findTransaction(target.transactionId)?.takeIf { it.editable }?.let { tx ->
+                original = tx
+                tx.toRequest(clientId).let { it to it.isTransfer }
+            }
+            is EditTarget.Queued -> repository.state.value.pending
+                .firstOrNull { it.request.clientId == target.clientId && it.change != PendingChange.DELETE }
+                ?.let { it.request to it.original?.isTransfer }
+        }
+        if (loaded == null) {
+            _form.update { it.copy(error = R.string.edit_missing) }
+            return
+        }
+        val (request, transferLock) = loaded
+        originalDate = request.date
+        _form.value = withSuggestedRate(formOf(request).copy(transferLock = transferLock))
+    }
+
+    /** The form filled in from [r]; a transfer shows from the account it leaves. */
+    private fun formOf(r: NewTransactionRequest): AddForm {
+        val zone = ZoneId.systemDefault()
+        val outgoing = r.kind == Kind.EXPENSE.api || r.isTransfer
+        return AddForm(
+            amount = (if (outgoing) "-" else "") + (r.amount.toBigDecimalOrNull()?.let(Format::amountInput) ?: r.amount),
+            signChosen = true,
+            accountId = r.accountId,
+            categoryId = r.categoryId,
+            transferAccountId = r.transferAccountId,
+            payee = r.payeeName.orEmpty(),
+            date = runCatching { Instant.parse(r.date).atZone(zone).toLocalDate() }.getOrDefault(LocalDate.now(zone)),
+            note = r.note.orEmpty(),
+            currency = r.currency,
+            rate = r.exchangeRate?.toBigDecimalOrNull()?.let(Format::rateInput).orEmpty(),
+            rateEdited = r.currency != null,
+        )
     }
 
     fun accountCurrency(form: AddForm): String? =
@@ -312,7 +382,8 @@ class AddTransactionViewModel(
     private fun defaultAccount(): String? {
         val snapshot = repository.state.value.snapshot ?: return null
         val candidates = snapshot.accounts.filter { !it.closed && !it.isHidden(hiddenAccounts.value) }
-        val lastUsed = repository.state.value.pending.lastOrNull()?.request?.accountId
+        val lastUsed = lastAccount?.lastAccountId
+            ?: repository.state.value.pending.lastOrNull { it.change == PendingChange.CREATE }?.request?.accountId
         return lastUsed?.takeIf { id -> candidates.any { it.id == id } }
             ?: candidates.filter { !it.hasInvestments }.maxByOrNull { it.transactionCount }?.id
     }
@@ -325,7 +396,8 @@ class AddTransactionViewModel(
      */
     private fun withValidTransfer(form: AddForm): AddForm {
         val id = form.transferAccountId ?: return form
-        val accounts = repository.state.value.snapshot?.accounts.orEmpty()
+        // Without the Mac's accounts there's nothing to check against yet.
+        val accounts = repository.state.value.snapshot?.accounts ?: return form
         val from = accounts.firstOrNull { it.id == form.accountId }
         val to = accounts.firstOrNull { it.id == id }
         return if (from == null || to == null || to.id == from.id || to.currency != from.currency) form.copy(transferAccountId = null)
@@ -391,9 +463,10 @@ class AddTransactionViewModel(
         }
     }
 
-    fun save(onSaved: () -> Unit) {
+    /** Queues the transaction or the change; [onSaved] gets a new transaction's clientId (to undo it), else null. */
+    fun save(onSaved: (addedClientId: String?) -> Unit) {
         val form = _form.value
-        if (form.saving) return
+        if (form.saving || !form.ready) return
         val amount = form.parsedAmount
         val rate = form.parsedRate
         val error = when {
@@ -408,14 +481,16 @@ class AddTransactionViewModel(
         }
         val zone = ZoneId.systemDefault()
         // Today keeps the current time (as Money does); other days get noon so time zones can't shift the date.
+        // An edit keeps the transaction's own time while its day stays.
         val time = if (form.date == LocalDate.now(zone)) LocalTime.now(zone) else LocalTime.NOON
+        val keptDate = originalDate?.takeIf { d -> runCatching { Instant.parse(d).atZone(zone).toLocalDate() }.getOrNull() == form.date }
         // A transfer goes from one account to the other: with a plus, from the picked account into the form's.
         val transferIn = form.transferAccountId != null && form.kind == Kind.INCOME
         val request = NewTransactionRequest(
             clientId = clientId,
             accountId = if (transferIn) form.transferAccountId!! else form.accountId!!,
             transferAccountId = if (transferIn) form.accountId else form.transferAccountId,
-            date = ZonedDateTime.of(form.date, time, zone).toInstant().toString(),
+            date = keptDate ?: ZonedDateTime.of(form.date, time, zone).toInstant().toString(),
             kind = if (form.transferAccountId != null) NewTransactionRequest.TRANSFER else form.kind.api,
             amount = amount!!.toPlainString(),
             categoryId = form.categoryId,
@@ -427,12 +502,38 @@ class AddTransactionViewModel(
         _form.update { it.copy(saving = true) }
         viewModelScope.launch {
             try {
-                repository.add(request)
+                when (editing) {
+                    null -> {
+                        repository.add(request)
+                        lastAccount?.lastAccountId = form.accountId
+                    }
+                    is EditTarget.Saved -> repository.edit(original ?: return@launch, request)
+                    is EditTarget.Queued -> repository.updatePending(editing.clientId, request)
+                }
             } catch (e: IOException) {
                 _form.update { it.copy(saving = false, error = R.string.error_storage) }
                 return@launch
             }
-            onSaved()
+            onSaved(if (editing == null) request.clientId else null)
+        }
+    }
+
+    /** For an edit: deletes the transaction on the Mac (queued), or drops the queued transaction or change. */
+    fun delete(onDone: () -> Unit) {
+        val target = editing ?: return
+        if (_form.value.saving) return
+        _form.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            try {
+                when (target) {
+                    is EditTarget.Saved -> repository.delete(original ?: return@launch)
+                    is EditTarget.Queued -> repository.discardPending(target.clientId)
+                }
+            } catch (e: IOException) {
+                _form.update { it.copy(saving = false, error = R.string.error_storage) }
+                return@launch
+            }
+            onDone()
         }
     }
 }

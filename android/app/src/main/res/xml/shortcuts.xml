@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press on the launcher icon: straight to the add form (MainActivity.ACTION_ADD). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_add"
+        android:shortcutId="add"
+        android:shortcutLongLabel="@string/add_transaction"
+        android:shortcutShortLabel="@string/action_add">
+        <intent
+            android:action="app.penny.action.ADD"
+            android:targetClass="app.penny.MainActivity"
+            android:targetPackage="app.penny" />
+    </shortcut>
+</shortcuts>

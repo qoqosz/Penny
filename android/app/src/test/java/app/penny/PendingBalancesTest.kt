@@ -53,6 +53,19 @@ class PendingBalancesTest {
         assertEquals(0, BigDecimal("957.50").compareTo(b["a"]))
     }
 
+    @Test fun `a change counts the difference, a deletion takes the amount out`() {
+        val original = NewTransactionRequest("o", "a", "2026-10-12T10:00:00Z", "expense", "10", transactionId = "T")
+        val moved = PendingTransaction(original.copy(clientId = "c", accountId = "s", amount = "15"), 0, original = original)
+        val b = balances(moved)
+        assertEquals("the old amount goes back to its account", BigDecimal("1010"), b["a"])
+        assertEquals(BigDecimal("485.50"), b["s"])
+        val transfer = NewTransactionRequest("t", "a", "2026-10-12T10:00:00Z", NewTransactionRequest.TRANSFER, "200",
+            transferAccountId = "s", transactionId = "T2")
+        val deleted = balances(PendingTransaction(transfer, 0, original = transfer, delete = true))
+        assertEquals(BigDecimal("1200"), deleted["a"])
+        assertEquals(BigDecimal("300.50"), deleted["s"])
+    }
+
     @Test fun `rejected transactions don't count`() {
         assertEquals(emptyMap<String, BigDecimal>(), pendingBalanceChanges(listOf(pending("expense", "5", rejected = "Nie"))))
         assertSame(snapshot, snapshot.withPending(listOf(pending("expense", "5", rejected = "Nie"))))

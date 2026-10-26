@@ -107,9 +107,12 @@ class BridgeClient(private val http: OkHttpClient = defaultHttp) {
             json.encodeToString(NewTransactionRequest.serializer(), request), httpFor(c.tls))
 
     /** Older bridges don't have this (404); send one by one with [create] then. */
-    suspend fun createBatch(c: Connection, requests: List<NewTransactionRequest>): BatchResults =
+    suspend fun createBatch(c: Connection, batch: NewTransactionBatch): BatchResults =
         call(url(c, "transactions/batch"), c.token,
-            json.encodeToString(NewTransactionBatch.serializer(), NewTransactionBatch(requests)), httpFor(c.tls))
+            json.encodeToString(NewTransactionBatch.serializer(), batch), httpFor(c.tls))
+
+    /** Which transactions Money hasn't uploaded to iCloud yet. Older bridges don't have this (404). */
+    suspend fun cloud(c: Connection): CloudStatus = call(url(c, "cloud"), c.token, null, httpFor(c.tls))
 
     /** A pinned connection always goes over HTTPS, never plain HTTP. */
     private fun url(c: Connection, path: String): HttpUrl = url(c.host, c.tls?.port ?: c.port, path, https = c.tls != null)

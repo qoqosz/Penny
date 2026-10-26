@@ -21,6 +21,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.serialization.Serializable
 
 sealed interface SyncStatus {
     data object Idle : SyncStatus
@@ -42,10 +44,21 @@ data class AppState(
     val dataVersion: Int = 0,
     /** The generation of the offline copy of transactions, once there is one (see [Repository.allTransactions]). */
     val offlineGeneration: String? = null,
+    /** What Money on the Mac hasn't uploaded to iCloud yet; null while unknown (or from a bridge that can't tell). */
+    val cloud: CloudStatus? = null,
+    /** When the phone last got the Mac's data (epoch ms), so screens can say how old the balances are. */
+    val updatedAt: Long? = null,
 ) {
     /** [snapshot] with the balances the queued transactions will make; account lists and totals show these. */
     val snapshotWithPending: Snapshot? by lazy { snapshot?.withPending(pending) }
+
+    /** The Mac's transactions that queued changes and deletions replace; lists show those instead. */
+    val replaced: Set<String> by lazy { pending.flatMapTo(HashSet()) { it.hides } }
 }
+
+/** `freshness.json`: when the Mac's data was last downloaded or confirmed unchanged. */
+@Serializable
+private data class Freshness(val updatedAt: Long)
 
 class Repository(
     private val settings: Settings,
@@ -77,17 +90,23 @@ class Repository(
     ) { snapshot, prices, rates -> snapshot?.let { Valuation(it, prices, rates) } }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    init {
-        scope.launch {
-            val cached = cache.read(SNAPSHOT_FILE, Snapshot.serializer())
-            val offlineGeneration = offline.current()?.generation
-            _state.update {
-                it.copy(snapshot = it.snapshot ?: cached, pending = queue.all(), offlineGeneration = it.offlineGeneration ?: offlineGeneration)
-            }
-            icons.load()
-            rates.load()
-            prices.load()
+    /** Reads what was stored (snapshot, queue, offline copy); done before the first changes are made in tests. */
+    val loaded = scope.launch {
+        val cached = cache.read(SNAPSHOT_FILE, Snapshot.serializer())
+        val offlineGeneration = offline.current()?.generation
+        val updatedAt = cache.read(FRESHNESS_FILE, Freshness.serializer())?.updatedAt
+        _state.update {
+            it.copy(
+                snapshot = it.snapshot ?: cached, pending = queue.all(),
+                offlineGeneration = it.offlineGeneration ?: offlineGeneration, updatedAt = it.updatedAt ?: updatedAt,
+            )
         }
+        icons.load()
+        rates.load()
+        prices.load()
+    }
+
+    init {
         // Back to automatic sync: send what manual mode kept waiting.
         scope.launch {
             syncMode.drop(1).collect { mode ->
@@ -103,7 +122,7 @@ class Repository(
         cache.clear()
         offline.clear()
         icons.clear()
-        _state.update { it.copy(snapshot = null, offlineGeneration = null) }
+        _state.update { it.copy(snapshot = null, offlineGeneration = null, cloud = null, updatedAt = null) }
         refresh()
     }
 
@@ -147,10 +166,14 @@ class Repository(
             val snapshot = client.snapshotIfChanged(connection, cached?.etag) ?: cached ?: client.snapshot(connection)
             val changed = snapshot.generation != cached?.generation
             if (snapshot !== cached) cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
+            val updatedAt = System.currentTimeMillis()
+            cache.write(FRESHNESS_FILE, Freshness.serializer(), Freshness(updatedAt))
             // Together, so balances never count a sent transaction twice (queued and in the snapshot) or not at all.
-            _state.update { it.copy(snapshot = snapshot, pending = queue.all(), dataVersion = it.dataVersion + if (changed) 1 else 0) }
+            _state.update {
+                it.copy(snapshot = snapshot, pending = queue.all(), dataVersion = it.dataVersion + if (changed) 1 else 0, updatedAt = updatedAt)
+            }
             offline.update(connection, snapshot.generation)
-            _state.update { it.copy(offlineGeneration = offline.current()?.generation) }
+            _state.update { it.copy(offlineGeneration = offline.current()?.generation, cloud = cloudStatus(connection)) }
             // Icons can take a while the first time; the lists show them as they arrive.
             scope.launch { syncIcons(connection, snapshot) }
             if (autoSync && _state.value.pending.any { it.rejectedReason == null }) scheduleSync()
@@ -211,6 +234,22 @@ class Repository(
         icons.sync(snapshot) { ids -> client.icons(connection, ids).icons }
     }
 
+    /** Asks the Mac again which changes Money hasn't uploaded to iCloud yet (cheap: no snapshot). */
+    suspend fun refreshCloud() {
+        val bridge = settings.current() ?: return
+        val cloud = withReconnect(bridge) { cloudStatus(it) } ?: return
+        _state.update { it.copy(cloud = cloud) }
+    }
+
+    /** Null when the bridge can't tell (too old, no SyncKit database) or the call fails; it's only shown, never needed. */
+    private suspend fun cloudStatus(connection: Connection): CloudStatus? = try {
+        client.cloud(connection)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
     /** Rates, prices and icons are extras: a failure keeps the older ones, and the next refresh tries again. */
     private suspend fun extra(block: suspend () -> Unit) {
         try {
@@ -238,9 +277,100 @@ class Repository(
             if (list.any { it.request.clientId == request.clientId }) list
             else list + PendingTransaction(request, System.currentTimeMillis())
         }
+        publish(pending)
+    }
+
+    /**
+     * Queues new values for a transaction the Mac has ([original], one that is [Transaction.editable]). A change of it
+     * already queued gets them instead.
+     */
+    suspend fun edit(original: Transaction, request: NewTransactionRequest) {
+        val pending = queue.update { list ->
+            val queued = list.firstOrNull { it.change == PendingChange.UPDATE && it.request.transactionId == original.id }
+            if (queued != null) {
+                list.map { if (it === queued) it.withRequest(request) else it }
+            } else {
+                list + PendingTransaction(
+                    request.copy(transactionId = original.id), System.currentTimeMillis(),
+                    original = original.toRequest(request.clientId), replaces = original.sides,
+                )
+            }
+        }
+        publish(pending)
+    }
+
+    /** Queues the deletion of a transaction the Mac has (one that is [Transaction.editable]), in place of a queued change of it. */
+    suspend fun delete(transaction: Transaction) {
+        val pending = queue.update { list ->
+            val queued = list.firstOrNull { it.change != PendingChange.CREATE && it.request.transactionId == transaction.id }
+            val original = queued?.original ?: transaction.toRequest(newClientId())
+            list.filterNot { it === queued } + PendingTransaction(
+                original.copy(clientId = newClientId()), System.currentTimeMillis(), original = original, delete = true,
+                replaces = queued?.replaces ?: transaction.sides,
+            )
+        }
+        publish(pending)
+    }
+
+    /**
+     * New values for a queued transaction or change. It keeps its clientId: should the Mac already have the old values
+     * (sent, but the answer lost), it takes these as a change of what it saved.
+     */
+    suspend fun updatePending(clientId: String, request: NewTransactionRequest) {
+        val pending = queue.update { list ->
+            list.map { if (it.request.clientId == clientId && !it.delete) it.withRequest(request) else it }
+        }
+        publish(pending)
+    }
+
+    private fun PendingTransaction.withRequest(request: NewTransactionRequest) = copy(
+        request = request.copy(clientId = this.request.clientId, transactionId = this.request.transactionId),
+        attempts = 0, rejectedReason = null, lastError = null,
+    )
+
+    private fun publish(pending: List<PendingTransaction>) {
         _state.update { it.copy(pending = pending) }
         if (autoSync) scope.launch { refresh() }
     }
+
+    /** Transactions added on this phone and saved on the Mac since the app started: clientId → its ID and request. */
+    private val sent = ConcurrentHashMap<String, Pair<String, NewTransactionRequest>>()
+
+    /**
+     * Takes back a transaction just added: still queued, it leaves the queue; already on the Mac, its deletion is
+     * queued. A send in progress is waited for, so it's one or the other.
+     */
+    suspend fun undoAdd(clientId: String) {
+        val deleting = syncMutex.withLock {
+            if (queue.all().any { it.request.clientId == clientId }) {
+                val pending = queue.update { list -> list.filterNot { it.request.clientId == clientId } }
+                _state.update { it.copy(pending = pending) }
+                false
+            } else {
+                val (id, request) = sent[clientId] ?: return
+                val original = request.copy(transactionId = id)
+                val sides = offline.current()?.items?.firstOrNull { it.id == id }?.sides ?: listOf(id)
+                val item = PendingTransaction(
+                    original.copy(clientId = newClientId()), System.currentTimeMillis(), original = original, delete = true,
+                    replaces = sides,
+                )
+                val pending = queue.update { it + item }
+                _state.update { it.copy(pending = pending) }
+                true
+            }
+        }
+        if (deleting && autoSync) refresh()
+    }
+
+    /** Transactions opened from a list, for [findTransaction] when the offline copy doesn't have them. */
+    private val opened = ConcurrentHashMap<String, Transaction>()
+
+    fun keep(transaction: Transaction) {
+        opened[transaction.id] = transaction
+    }
+
+    /** A transaction of the Mac's by ID: one opened from a list ([keep]), else from the offline copy. */
+    suspend fun findTransaction(id: String): Transaction? = opened[id] ?: offline.current()?.items?.firstOrNull { it.id == id }
 
     fun newClientId(): String = UUID.randomUUID().toString()
 
@@ -296,10 +426,17 @@ class Repository(
     private suspend fun pushPending(connection: Connection) {
         val waiting = queue.all().filter { it.rejectedReason == null }
         for (chunk in waiting.chunked(BATCH_SIZE)) {
+            fun of(change: PendingChange) = chunk.filter { it.change == change }
+            val batch = NewTransactionBatch(
+                transactions = of(PendingChange.CREATE).map { it.request },
+                updates = of(PendingChange.UPDATE).map { it.request },
+                deletes = of(PendingChange.DELETE).map { DeleteTransactionRequest(it.request.clientId, it.request.transactionId.orEmpty()) },
+            )
             val results = try {
-                client.createBatch(connection, chunk.map { it.request }).results
+                client.createBatch(connection, batch).results
             } catch (e: BridgeException) {
-                if (e.status == 404) return pushOneByOne(connection, chunk)
+                // A bridge that old can't change transactions (and never offers to).
+                if (e.status == 404) return pushOneByOne(connection, of(PendingChange.CREATE))
                 // Nothing was written (Money in use, a problem on the Mac): every item gets the error.
                 chunk.forEach { record(it, e) }
                 if (e.status == 401) throw e
@@ -309,7 +446,7 @@ class Repository(
             for (item in chunk) {
                 // Missing from the answer: left as it was, for the next sync.
                 val result = byId[item.request.clientId] ?: continue
-                record(item, result.error?.let { BridgeException(it.status, it.code, it.message) })
+                record(item, result.error?.let { BridgeException(it.status, it.code, it.message) }, result.transactionId)
             }
         }
     }
@@ -318,8 +455,7 @@ class Repository(
     private suspend fun pushOneByOne(connection: Connection, items: List<PendingTransaction>) {
         for (item in items) {
             try {
-                client.create(connection, item.request)
-                record(item, null)
+                record(item, null, client.create(connection, item.request).id)
             } catch (e: BridgeException) {
                 record(item, e)
                 if (e.status == 401) throw e
@@ -328,9 +464,10 @@ class Repository(
     }
 
     /** Takes a sent transaction off the queue ([error] null) or notes why it wasn't written. */
-    private suspend fun record(item: PendingTransaction, error: BridgeException?) {
+    private suspend fun record(item: PendingTransaction, error: BridgeException?, transactionId: String? = null) {
         val id = item.request.clientId
         if (error == null) {
+            if (item.change == PendingChange.CREATE && transactionId != null) sent[id] = transactionId to item.request
             // It leaves the shown queue with the next snapshot, which has it (see refresh).
             queue.update { list -> list.filterNot { it.request.clientId == id } }
             return
@@ -388,6 +525,7 @@ class Repository(
         /** The bridge takes at most 100 transactions per batch. */
         private const val BATCH_SIZE = 100
         private const val SNAPSHOT_FILE = "snapshot.json"
+        private const val FRESHNESS_FILE = "freshness.json"
         private const val TLS_CHECK_INTERVAL_MS = 60 * 60 * 1000L
     }
 }

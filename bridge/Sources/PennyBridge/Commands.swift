@@ -183,6 +183,7 @@ enum Commands {
                     + "originObjectID=\(conventions.usesOriginObjectID), tracked transactions: "
                     + "\(conventions.trackedTransactions)/\(snapshot.transactions.count)")
                 print("  States: \(conventions.stateHistogram.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
+                cloudReport(syncStore: sync, conventions: conventions, model: model, store: location.storeURL)
             } catch {
                 print("\n✗ SyncKit: \(error)")
             }
@@ -190,6 +191,37 @@ enum Commands {
         print("\nMoney running: \(MoneyAppController(appURL: location.appURL).isRunning ? "yes" : "no")")
         print("Writes enabled: \(config.writesEnabled ? "yes" : "no")")
         if verbose { try rawDump(location) }
+    }
+
+    /// Whether Money has sent the changes in its database to iCloud: SyncKit rows not synced yet, by age.
+    static func cloudReport(syncStore: URL, conventions: SyncConventions, model: NSManagedObjectModel, store: URL,
+                            now: Date = Date()) {
+        do {
+            let (live, stale) = try CloudStatus.classify(
+                try CloudStatus.waiting(syncStore: syncStore, conventions: conventions), model: model, store: store)
+            let overdue = live.filter { ($0.since ?? .distantPast) < now.addingTimeInterval(-CloudStatus.overdue) }
+            let minutes = Int(CloudStatus.overdue / 60)
+            func describe(_ row: CloudRow) -> String {
+                let state = [SyncState.new: "new", SyncState.changed: "changed", SyncState.deleted: "deleted"][row.state] ?? "state \(row.state)"
+                return "\(row.entity).\(row.uniqueID) (\(state), \(row.since?.formatted() ?? "no date"))"
+            }
+            if live.isEmpty {
+                print("✓ iCloud: no changes waiting to be uploaded")
+            } else if overdue.isEmpty {
+                print("  iCloud: \(live.count) change(s) waiting; Money uploads them on its next sync")
+            } else {
+                print("✗ iCloud: \(overdue.count) change(s) have waited more than \(minutes) minutes to be uploaded. "
+                    + "Money hasn't sent them to iCloud: open Money on this Mac and check that its iCloud sync works.")
+                let oldest = overdue.sorted { ($0.since ?? .distantPast) < ($1.since ?? .distantPast) }
+                for row in oldest.prefix(5) { print("    \(describe(row))") }
+                if oldest.count > 5 { print("    … and \(oldest.count - 5) more") }
+            }
+            if !stale.isEmpty {
+                print("  SyncKit rows left over for objects no longer in Money: \(stale.count) (Money's, not the bridge's; ignored)")
+            }
+        } catch {
+            print("✗ iCloud: couldn't check what is waiting to be uploaded: \(error)")
+        }
     }
 
     /// Raw rows used to confirm how Money encodes things (types, signs, SyncKit records).

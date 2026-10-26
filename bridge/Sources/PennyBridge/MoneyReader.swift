@@ -88,6 +88,8 @@ struct SplitDTO: Codable {
     let category: String?
     let note: String?
     let transferAccountId: String?
+    /// A transfer's other side, when the splits are linked.
+    let transferTransactionId: String?
 }
 
 struct TagDTO: Codable {
@@ -129,6 +131,9 @@ struct TransactionDTO: Codable {
     let originalCurrency: String?
     let exchangeRate: String?
     let investment: InvestmentDTO?
+    /// True when the phone may change or delete it (`updates`/`deletes` in `POST transactions/batch`): it was added
+    /// from the phone, and it (and a transfer's other side) still has one split, no security and isn't reconciled.
+    let editable: Bool?
 }
 
 struct SnapshotDTO: Codable {
@@ -141,6 +146,8 @@ struct SnapshotDTO: Codable {
     let writesEnabled: Bool
     /// Transfers between accounts can be added (older bridges leave this out and reject them).
     let writesTransfers: Bool
+    /// Transactions marked `editable` can be changed and deleted (older bridges leave this out).
+    let writesEdits: Bool
     let defaultCurrency: String?
     /// The currencies set up in Money, the default one first. Transactions can be added in any of them
     /// (bridges without this field write in the account's currency only).
@@ -255,6 +262,8 @@ struct MoneySnapshot {
     let transferTemplates: [TransferShape: TransferTemplate]
     /// The categories Money keeps for each account (by account ID), the most used in transfers first.
     let accountCategories: [String: [String]]
+    /// Each side of a transfer (linked splits) by the other side's transaction ID.
+    let transferPartners: [String: String]
     let idStyle: IDStyle
 
     func account(_ id: String) -> AccountDTO? { accounts.first { $0.id == id } }
@@ -264,6 +273,7 @@ struct MoneySnapshot {
     func dto(writesEnabled: Bool) throws -> SnapshotDTO {
         var dto = SnapshotDTO(
             generation: generation, etag: nil, bridgeVersion: bridgeVersion, writesEnabled: writesEnabled, writesTransfers: true,
+            writesEdits: true,
             defaultCurrency: defaultCurrency, currencies: currencies, accounts: accounts, categories: categories, payees: payees,
             securities: securities)
         dto.etag = try ContentHash.of(value: dto)
@@ -274,15 +284,20 @@ struct MoneySnapshot {
 // MARK: - Reader
 
 enum MoneyReader {
-    /// `moneyVersion` (Money.app's build) versions the category icons that come with the app.
-    static func read(model: NSManagedObjectModel, storeURL: URL, moneyVersion: String) throws -> MoneySnapshot {
+    /// `moneyVersion` (Money.app's build) versions the category icons that come with the app. [phoneTransactions] are
+    /// the ones the phone added, which it may change and delete (see `TransactionDTO.editable`).
+    static func read(model: NSManagedObjectModel, storeURL: URL, moneyVersion: String,
+                     phoneTransactions: Set<String> = ChangeLog.transactionIDs()) throws -> MoneySnapshot {
         let fileGeneration = MoneyLocator.fileGeneration(of: storeURL)
         let store = try CoreDataStore(model: model, url: storeURL, readOnly: true)
         defer { store.close() }
-        return try store.perform { try build($0, fileGeneration: fileGeneration, moneyVersion: moneyVersion) }
+        return try store.perform {
+            try build($0, fileGeneration: fileGeneration, moneyVersion: moneyVersion, phoneTransactions: phoneTransactions)
+        }
     }
 
-    private static func build(_ ctx: NSManagedObjectContext, fileGeneration: String, moneyVersion: String) throws -> MoneySnapshot {
+    private static func build(_ ctx: NSManagedObjectContext, fileGeneration: String, moneyVersion: String,
+                              phoneTransactions: Set<String>) throws -> MoneySnapshot {
         let currencyObjects = try ctx.fetchAll("Currency")
         let defaultCurrency = currencyObjects.first { $0.bool("defaultCurrency") }?.string("code")
         // In Money's order (its currency settings), the default one first.
@@ -398,6 +413,12 @@ enum MoneyReader {
                 splitTo: split?.to, splitFrom: split?.from)
         }
 
+        /// What the phone may change: one split, no security, not reconciled, on both sides of a transfer.
+        func plain(_ tx: NSManagedObject) -> Bool {
+            tx.objects("transactionSplits").count == 1 && tx.object("tradableAsset") == nil && tx.int("reconciledStatus") == 0
+        }
+        var transferPartners: [String: String] = [:]
+
         // When a transaction was added: its splits' createdDate, else its last change. Orders transactions with the same date.
         var addedDates: [String: Date] = [:]
         for tx in transactionObjects {
@@ -431,7 +452,8 @@ enum MoneyReader {
                 splits.append(SplitDTO(
                     id: split.publicID, amount: amount.plainString, categoryId: category?.publicID,
                     category: category.map(fullName) ?? split.string("categoryRepresentationString"),
-                    note: split.string("note"), transferAccountId: transfer?.publicID))
+                    note: split.string("note"), transferAccountId: transfer?.publicID,
+                    transferTransactionId: (split.object("transferSplit") ?? split.object("transferSplitInverse"))?.object("transaction")?.publicID))
             }
             let kind: Kind = isTransfer ? .transfer : (total < 0 ? .expense : .income)
             balances[account.objectID, default: 0] += total
@@ -441,6 +463,12 @@ enum MoneyReader {
             if let id = tx.string("uniqueIdentifier"), idSamples.count < 200 { idSamples.append(id) }
             let txCurrency = tx.string("currencyCode")
             let foreign = txCurrency.map { !$0.isEmpty && $0 != currency } ?? false
+            let partner = splitObjects.count == 1
+                ? (splitObjects[0].object("transferSplit") ?? splitObjects[0].object("transferSplitInverse"))?.object("transaction") : nil
+            if let partner { transferPartners[tx.publicID] = partner.publicID }
+            // A transfer only through an account's category (no linked split) isn't one the phone made.
+            let editable = (phoneTransactions.contains(tx.publicID) || partner.map { phoneTransactions.contains($0.publicID) } == true)
+                && plain(tx) && isTransfer == (partner != nil) && partner.map(plain) != false
 
             transactions.append(TransactionDTO(
                 id: tx.publicID, accountId: account.publicID, date: date,
@@ -451,7 +479,7 @@ enum MoneyReader {
                 tags: tags(of: tx, splits: splitObjects), location: location(of: tx),
                 originalAmount: foreign ? originalTotal.plainString : nil, originalCurrency: foreign ? txCurrency : nil,
                 exchangeRate: foreign ? tx.decimal("currencyRateToAccountCurrency").plainString : nil,
-                investment: investment(tx, account: account, date: date, currency: currency)))
+                investment: investment(tx, account: account, date: date, currency: currency), editable: editable ? true : nil))
 
             // Plain single-split transactions are the model for the ones created from the phone.
             if kind != .transfer, splitObjects.count == 1, let split = splitObjects.first, total != 0,
@@ -620,7 +648,7 @@ enum MoneyReader {
             accountCategories: accountCategories.mapValues { list in
                 list.sorted { transferCategoryUses[$0.objectID, default: 0] > transferCategoryUses[$1.objectID, default: 0] }.map(\.publicID)
             },
-            idStyle: IDStyle.detect(idSamples))
+            transferPartners: transferPartners, idStyle: IDStyle.detect(idSamples))
     }
 }
 

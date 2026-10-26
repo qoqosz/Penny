@@ -20,10 +20,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
@@ -49,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
@@ -81,7 +85,10 @@ fun AddTransactionScreen(
     repository: Repository,
     hiddenAccounts: StateFlow<HiddenAccounts>,
     vm: AddTransactionViewModel,
+    /** Closes the form without saving, or after a deletion. */
     onDone: () -> Unit,
+    /** After saving; a new transaction's clientId, to offer undoing it (null for an edit). */
+    onSaved: (String?) -> Unit,
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
     val hidden by hiddenAccounts.collectAsStateWithLifecycle()
@@ -90,13 +97,20 @@ fun AddTransactionScreen(
     val snapshot = app.snapshotWithPending
     var pickCategory by rememberSaveable { mutableStateOf(false) }
     var pickDate by rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.add_title)) },
+                title = { Text(stringResource(if (vm.isEdit) R.string.edit_title else R.string.add_title)) },
                 navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_cancel)) } },
-                actions = { TextButton(onClick = { vm.save(onDone) }, enabled = snapshot != null && !form.saving) {
+                actions = {
+                    if (vm.isEdit) {
+                        IconButton(onClick = { confirmDelete = true }, enabled = form.ready && !form.saving) {
+                            Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.action_delete))
+                        }
+                    }
+                    TextButton(onClick = { vm.save(onSaved) }, enabled = snapshot != null && form.ready && !form.saving) {
                         Text(stringResource(R.string.action_save))
                     }
                 },
@@ -105,6 +119,13 @@ fun AddTransactionScreen(
     ) { padding ->
         if (snapshot == null) {
             EmptyState(stringResource(R.string.add_connect_first), Modifier.padding(padding))
+            return@Scaffold
+        }
+        if (!form.ready) {
+            // The edited transaction is loading, or it wasn't found.
+            Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
+                form.error?.let { EmptyState(stringResource(it)) } ?: CircularProgressIndicator()
+            }
             return@Scaffold
         }
         val account = snapshot.accounts.firstOrNull { it.id == form.accountId }
@@ -205,11 +226,11 @@ fun AddTransactionScreen(
 
             form.error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
 
-            Button(onClick = { vm.save(onDone) }, enabled = !form.saving, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { vm.save(onSaved) }, enabled = !form.saving, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.action_save))
             }
             Text(
-                stringResource(R.string.add_footer),
+                stringResource(if (vm.isEdit) R.string.edit_footer else R.string.add_footer),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -225,6 +246,8 @@ fun AddTransactionScreen(
                     !it.closed && it.id != form.accountId && it.currency == account?.currency
                 },
                 transfersUnsupported = !snapshot.writesTransfers,
+                // The Mac can't turn a transfer into an expense or income, or the other way round.
+                transferLock = form.transferLock,
                 icons = repository.icons,
                 onPick = { id -> vm.setCategory(id); pickCategory = false },
                 onPickAccount = { id -> vm.setTransfer(id); pickCategory = false },
@@ -248,6 +271,19 @@ fun AddTransactionScreen(
                 },
                 dismissButton = { TextButton(onClick = { pickDate = false }) { Text(stringResource(R.string.action_cancel)) } },
             ) { DatePicker(state) }
+        }
+        if (confirmDelete) {
+            AlertDialog(
+                onDismissRequest = { confirmDelete = false },
+                title = { Text(stringResource(R.string.delete_title)) },
+                text = { Text(stringResource(if (form.transferAccountId != null) R.string.delete_transfer_text else R.string.delete_text)) },
+                confirmButton = {
+                    TextButton(onClick = { confirmDelete = false; vm.delete(onDone) }) {
+                        Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
+            )
         }
     }
 }
@@ -409,6 +445,8 @@ private fun CategoryPicker(
     accounts: List<Account>,
     /** The bridge is too old for transfers: the accounts are replaced by a note. */
     transfersUnsupported: Boolean,
+    /** An edit: true offers only accounts (it stays a transfer), false only categories; null both. */
+    transferLock: Boolean?,
     icons: IconStore,
     onPick: (String?) -> Unit,
     onPickAccount: (String) -> Unit,
@@ -441,7 +479,17 @@ private fun CategoryPicker(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 )
                 LazyColumn(Modifier.fillMaxSize().imePadding()) {
-                    if (query.isBlank()) {
+                    transferLock?.let { lock ->
+                        item(key = "lock-note") {
+                            Text(
+                                stringResource(if (lock) R.string.edit_transfer_locked else R.string.edit_no_transfer),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                    if (transferLock != true && query.isBlank()) {
                         item { ListRow(stringResource(R.string.no_category), "", Modifier.clickable { onPick(null) }) }
                         if (frequent.isNotEmpty()) {
                             item { SectionHeader(stringResource(R.string.categories_frequent)) }
@@ -450,6 +498,7 @@ private fun CategoryPicker(
                         }
                     }
                     for (kind in Kind.entries) {
+                        if (transferLock == true) break
                         val ofKind = filtered.filter { it.kind == kind.api }
                         if (ofKind.isEmpty()) continue
                         item(key = "h-" + kind.api) {
@@ -457,7 +506,9 @@ private fun CategoryPicker(
                         }
                         items(ofKind, key = { it.id }) { CategoryRow(it, icons, onPick) }
                     }
-                    if (filteredAccounts.isNotEmpty() && transfersUnsupported) {
+                    if (transferLock == false) {
+                        // No accounts: it can't become a transfer.
+                    } else if (filteredAccounts.isNotEmpty() && transfersUnsupported) {
                         item(key = "h-accounts") { SectionHeader(stringResource(R.string.categories_transfers)) }
                         item(key = "transfers-old-bridge") {
                             Text(
@@ -478,7 +529,7 @@ private fun CategoryPicker(
                             )
                         }
                     }
-                    if (filtered.isEmpty() && filteredAccounts.isEmpty()) {
+                    if ((filtered.isEmpty() || transferLock == true) && (filteredAccounts.isEmpty() || transferLock == false)) {
                         item { EmptyState(stringResource(R.string.categories_no_match)) }
                     }
                 }

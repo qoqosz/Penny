@@ -5,6 +5,7 @@ import app.penny.data.BridgeException
 import app.penny.data.Connection
 import app.penny.data.HiddenAccounts
 import app.penny.data.IncompatibleResponseException
+import app.penny.data.NewTransactionBatch
 import app.penny.data.NewTransactionRequest
 import app.penny.data.UnreachableException
 import app.penny.ui.Format
@@ -117,7 +118,7 @@ class BridgeClientTest {
                         {"clientId":"id-2","error":{"status":422,"code":"invalid","message":"Invalid amount: -1"}}]}
         """.trimIndent()))
         val one = NewTransactionRequest("id-1", "A", "2026-10-03T09:30:00Z", "expense", "12.5")
-        val results = client.createBatch(connection, listOf(one, one.copy(clientId = "id-2", amount = "-1"))).results
+        val results = client.createBatch(connection, NewTransactionBatch(listOf(one, one.copy(clientId = "id-2", amount = "-1")))).results
         assertEquals("T1", results[0].transactionId)
         assertNull(results[0].error)
         assertEquals(422, results[1].error?.status)
@@ -129,7 +130,7 @@ class BridgeClientTest {
         // An older bridge doesn't know the endpoint; the repository then sends one by one.
         server.enqueue(MockResponse().setResponseCode(404)
             .setBody("""{"error":{"code":"not_found","message":"Unknown endpoint"}}"""))
-        val old = runCatching { client.createBatch(connection, listOf(one)) }.exceptionOrNull() as BridgeException
+        val old = runCatching { client.createBatch(connection, NewTransactionBatch(listOf(one))) }.exceptionOrNull() as BridgeException
         assertEquals(404, old.status)
     }
 

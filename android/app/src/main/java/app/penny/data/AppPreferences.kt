@@ -24,11 +24,16 @@ enum class SyncMode { AUTOMATIC, MANUAL }
 /** What the user hid in settings: whole Money folders and single accounts, by ID. */
 data class HiddenAccounts(val folders: Set<String> = emptySet(), val accounts: Set<String> = emptySet())
 
+/** Where the add form keeps the account it last added a transaction to. */
+interface LastAccount {
+    var lastAccountId: String?
+}
+
 /**
  * UI preferences. Kept in SharedPreferences rather than DataStore because the theme has to be known synchronously
  * before the first activity is created. The language is stored by AppCompat itself (or by the system on Android 13+).
  */
-class AppPreferences(private val prefs: SharedPreferences) {
+class AppPreferences(private val prefs: SharedPreferences) : LastAccount {
     private val _theme = MutableStateFlow(
         runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME, null)!!) }.getOrDefault(ThemeMode.SYSTEM)
     )
@@ -65,6 +70,11 @@ class AppPreferences(private val prefs: SharedPreferences) {
         _hidden.value = _hidden.value.copy(accounts = accounts)
     }
 
+    /** The add form starts in this account. */
+    override var lastAccountId: String?
+        get() = prefs.getString(KEY_LAST_ACCOUNT, null)
+        set(value) = prefs.edit { putString(KEY_LAST_ACCOUNT, value) }
+
     private fun Set<String>.toggled(id: String, add: Boolean) = if (add) this + id else this - id
 
     /** Applies the stored theme; call before any activity is created. */
@@ -93,5 +103,6 @@ class AppPreferences(private val prefs: SharedPreferences) {
         const val KEY_SYNC_MODE = "sync_mode"
         const val KEY_HIDDEN_FOLDERS = "hidden_folders"
         const val KEY_HIDDEN_ACCOUNTS = "hidden_accounts"
+        const val KEY_LAST_ACCOUNT = "last_account"
     }
 }

@@ -388,6 +388,9 @@ enum SelfTest {
         let backups = (try? FileManager.default.contentsOfDirectory(atPath: Paths.backups.path)) ?? []
         check(backups.count == 5, "a backup before every write, one per batch")
 
+        try editChecks(base: base, token: token, location: location, account: ids.account, savings: ids.savings,
+                       food: ids.food, lidl: ids.lidl)
+
         try syncChecks(base: base, token: token, location: location, api: api)
         try interruptedWrites(location, config: config, api: api, account: ids.account)
         try backupRetention(tmp.appendingPathComponent("retention"))

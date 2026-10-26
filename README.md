@@ -30,6 +30,20 @@ Android (Penny) ⇄ Wi-Fi ⇄ penny-bridge (Mac) ⇄ local Money database ⇄ Mo
   two linked transactions, a minus in one account and a plus in the other, copied from the latest transfer you made
   in Money.
 - The phone keeps an offline queue: transactions added away from home wait and are sent once you're back on Wi-Fi.
+  A queued transaction can be edited or deleted until it's sent.
+- **Changing and deleting:** transactions added from the phone (with one category, no securities, not reconciled)
+  have **Edit** and **Delete** in their details. The change goes through the same queue; the bridge changes the
+  transaction in place (it keeps its tags, location and ID) and records only the changed fields for SyncKit
+  ("changed"), or marks it deleted. A transfer is changed or deleted on both sides. Right after adding, **Undo** takes
+  the transaction back: from the queue, or from Money if it was already sent. Transactions made in Money can't be
+  changed from the phone yet.
+- **Quick add:** a home screen widget, a launcher shortcut (long-press the icon) and a Quick Settings tile open the add
+  form directly, behind the app lock when it's on. The form starts in the account you last added to.
+- **iCloud:** the phone also asks the bridge which changes Money hasn't uploaded to iCloud yet (SyncKit rows not in
+  the "synced" state). Such transactions show a cloud mark, their details say whether Money has sent them, and the
+  main screen warns when something has waited more than 10 minutes (and whether Money is running).
+- **How fresh the data is:** the total shows when it was last downloaded ("Updated 5 minutes ago"), and when the Mac
+  can't be reached the banner says how old the shown balances are.
 - **Icons:** transactions show the payee's logo from Money, or else the category's icon (Money's built-in glyphs,
   taken from Money.app). The phone downloads them once and keeps them for offline use. Icons only go one way: nothing
   the phone adds carries an icon, and a payee created from the phone has none until you give it one in Money.
@@ -149,7 +163,7 @@ The settings screen (gear icon on the main screen) offers:
 | Command | Description |
 |---|---|
 | `penny-bridge pair` | phone pairing code (valid for 10 min) |
-| `penny-bridge doctor [--verbose]` | diagnostics: database locations, detected conventions, balances |
+| `penny-bridge doctor [--verbose]` | diagnostics: database locations, detected conventions, balances, changes not yet uploaded to iCloud (warns after 10 minutes) |
 | `penny-bridge devices` / `revoke ID` | paired devices (ID, name, when paired and last seen); `revoke` also takes a name if only one device has it |
 | `penny-bridge install` / `uninstall` | LaunchAgent service |
 | `penny-bridge selftest` | write test on a throwaway database built from Money's model |
@@ -185,8 +199,8 @@ Transactions added from the phone are written to the demo database.
 - Writing closes Money for a few seconds. When Money is frontmost (you're using it right now) or has an edit window
   open, the bridge defers the write and the phone retries later. This can be turned off with
   `deferWhileMoneyActive: false`.
-- Only expenses, income with a single category, and transfers are supported. Split transactions and editing
-  existing transactions don't work yet. Transfers work between accounts in the same currency, and only after
+- Only expenses, income with a single category, and transfers are supported. Split transactions don't work yet, and
+  only transactions added from the phone can be changed or deleted from it (a transfer stays a transfer). Transfers work between accounts in the same currency, and only after
   you've made at least one similar transfer in Money (one to or from an investment account counts separately).
 - Securities are valued at Yahoo Finance's prices (delayed during trading hours), not your broker's.
 - Converted amounts use the ECB's reference rates, not the rates your bank charged, so they're close but not exact.

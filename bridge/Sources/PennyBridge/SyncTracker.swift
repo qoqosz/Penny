@@ -53,33 +53,98 @@ struct SyncConventions {
     }
 }
 
-struct InsertedObject {
-    let entity: String
-    let uniqueID: String
+/// SyncKit's `SyncedEntityState` in Money's fork (checked in its disassembly). New ones use `BridgeConfig.syncNewState`.
+enum SyncState {
+    static let new = 0
+    static let changed = 1
+    static let deleted = 2
+    static let synced = 3
+}
+
+/// An object written to Money's database that SyncKit has to send to iCloud.
+enum SyncChange: Equatable {
+    case inserted(entity: String, uniqueID: String)
+    /// [keys]: the attributes and to-one relationships that changed (SyncKit's `changedKeys`).
+    case updated(entity: String, uniqueID: String, keys: [String])
+    case deleted(entity: String, uniqueID: String)
+
+    /// What [ctx] is about to save, as Money's SyncKit records it when Money saves: called after
+    /// `processPendingChanges()` and before `save()`. Objects whose only change is a to-many relationship (an account
+    /// that got a transaction) are left out; CloudKit records only hold to-one references.
+    static func pending(in ctx: NSManagedObjectContext) -> [SyncChange] {
+        func id(_ o: NSManagedObject) -> String? { o.string("uniqueIdentifier").flatMap { $0.isEmpty ? nil : $0 } }
+        var changes: [SyncChange] = []
+        for o in ctx.insertedObjects {
+            if let id = id(o) { changes.append(.inserted(entity: o.entityName, uniqueID: id)) }
+        }
+        for o in ctx.updatedObjects where !o.isDeleted {
+            let synced = Set(o.entity.attributesByName.keys).union(o.entity.relationshipsByName.filter { !$0.value.isToMany }.keys)
+            let keys = o.changedValues().keys.filter(synced.contains).sorted()
+            if !keys.isEmpty, let id = id(o) { changes.append(.updated(entity: o.entityName, uniqueID: id, keys: keys)) }
+        }
+        for o in ctx.deletedObjects {
+            if let id = id(o) { changes.append(.deleted(entity: o.entityName, uniqueID: id)) }
+        }
+        return changes
+    }
 }
 
 enum SyncTracker {
-    /// Registers new objects with SyncKit in the "new" state, exactly as Money does when it saves an object itself.
-    /// On its next sync Money builds CloudKit records from them and uploads them.
-    static func track(_ objects: [InsertedObject], model: NSManagedObjectModel, syncStore: URL,
-                      conventions: SyncConventions, newState: Int) throws {
+    /// Records changes for SyncKit exactly as Money does when it saves an object itself. New objects get a row in the
+    /// "new" state. A changed one goes to "changed" with its keys added to `changedKeys` (a new one not uploaded yet
+    /// stays new: all of it goes up anyway). A deleted one goes to "deleted", or loses its row when it never reached
+    /// iCloud. On its next sync Money uploads them.
+    static func record(_ changes: [SyncChange], model: NSManagedObjectModel, syncStore: URL,
+                       conventions: SyncConventions, newState: Int) throws {
         let store = try CoreDataStore(model: model, url: syncStore, readOnly: false)
         defer { store.close() }
         try store.perform { ctx in
             let now = Date()
-            for object in objects {
-                let identifier = conventions.identifier(entity: object.entity, uniqueID: object.uniqueID)
-                if try ctx.fetchFirst("QSSyncedEntity", NSPredicate(format: "identifier == %@", identifier)) != nil {
-                    continue
-                }
-                let entity = NSEntityDescription.insertNewObject(forEntityName: "QSSyncedEntity", into: ctx)
-                entity.setValue(identifier, forKey: "identifier")
-                entity.setValue(object.entity, forKey: "entityType")
-                entity.setValue(NSNumber(value: Int16(newState)), forKey: "state")
-                entity.setValue(now, forKey: "updatedDate")
+            func row(_ identifier: String) throws -> NSManagedObject? {
+                try ctx.fetchFirst("QSSyncedEntity", NSPredicate(format: "identifier == %@", identifier))
+            }
+            func insert(_ identifier: String, entity: String, uniqueID: String) {
+                let row = NSEntityDescription.insertNewObject(forEntityName: "QSSyncedEntity", into: ctx)
+                row.setValue(identifier, forKey: "identifier")
+                row.setValue(entity, forKey: "entityType")
+                row.setValue(NSNumber(value: Int16(newState)), forKey: "state")
+                row.setValue(now, forKey: "updatedDate")
                 if conventions.usesOriginObjectID {
                     // Money's SyncKit stores the object's own uniqueIdentifier here.
-                    entity.setValue(object.uniqueID, forKey: "originObjectID")
+                    row.setValue(uniqueID, forKey: "originObjectID")
+                }
+            }
+            for change in changes {
+                switch change {
+                case .inserted(let entity, let uniqueID):
+                    let identifier = conventions.identifier(entity: entity, uniqueID: uniqueID)
+                    if try row(identifier) == nil { insert(identifier, entity: entity, uniqueID: uniqueID) }
+                case .updated(let entity, let uniqueID, let keys):
+                    let identifier = conventions.identifier(entity: entity, uniqueID: uniqueID)
+                    guard let existing = try row(identifier) else {
+                        // Never tracked: like SyncKit, it starts as new.
+                        insert(identifier, entity: entity, uniqueID: uniqueID)
+                        continue
+                    }
+                    switch existing.int("state") {
+                    case newState, SyncState.deleted:
+                        break
+                    case SyncState.changed:
+                        let known = (existing.string("changedKeys") ?? "").split(separator: ",").map(String.init)
+                        existing.setValue((known + keys.filter { !known.contains($0) }).joined(separator: ","), forKey: "changedKeys")
+                    default:
+                        existing.setValue(NSNumber(value: Int16(SyncState.changed)), forKey: "state")
+                        existing.setValue(keys.joined(separator: ","), forKey: "changedKeys")
+                    }
+                    existing.setValue(now, forKey: "updatedDate")
+                case .deleted(let entity, let uniqueID):
+                    guard let existing = try row(conventions.identifier(entity: entity, uniqueID: uniqueID)) else { continue }
+                    if existing.int("state") == newState {
+                        ctx.delete(existing)
+                    } else {
+                        existing.setValue(NSNumber(value: Int16(SyncState.deleted)), forKey: "state")
+                        existing.setValue(now, forKey: "updatedDate")
+                    }
                 }
             }
             try ctx.save()

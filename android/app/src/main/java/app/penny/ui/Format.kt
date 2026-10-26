@@ -141,6 +141,12 @@ object Format {
     }
 
     /** A rate to prefill an input with: 6 decimals at most, with the language's decimal separator. */
+    /** An amount as the add form's field shows it, e.g. "12,5" in Polish: no grouping, the app's decimal separator. */
+    fun amountInput(amount: BigDecimal): String {
+        val plain = amount.stripTrailingZeros().let { if (it.scale() < 0) it.setScale(0) else it }.toPlainString()
+        return plain.replace('.', java.text.DecimalFormatSymbols.getInstance(Locale.getDefault()).decimalSeparator)
+    }
+
     fun rateInput(rate: BigDecimal): String {
         val plain = rate.setScale(6, RoundingMode.HALF_EVEN).stripTrailingZeros().toPlainString()
         return plain.replace('.', java.text.DecimalFormatSymbols.getInstance(Locale.getDefault()).decimalSeparator)

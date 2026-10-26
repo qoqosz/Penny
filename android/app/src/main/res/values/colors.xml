@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The add widget, in the app's primary container colors (dynamic colors from Android 12 on: values-v31). -->
+    <color name="widget_background">#FFA7F2CD</color>
+    <color name="widget_foreground">#FF002114</color>
+</resources>

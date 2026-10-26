@@ -24,6 +24,8 @@ enum ContentHash {
 
     static func of<T: Encodable>(value: T) throws -> String { hex(SHA256.hash(data: try encoder.encode(value))) }
 
+    static func of(text: String) -> String { hex(SHA256.hash(data: Data(text.utf8))) }
+
     /// The first 128 bits are plenty to tell versions apart.
     private static func hex(_ digest: SHA256.Digest) -> String {
         digest.prefix(16).map { String(format: "%02x", $0) }.joined()

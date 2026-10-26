@@ -135,27 +135,40 @@ final class API {
             }
             return try .json(created, status: 201)
         case ("POST", "/api/v1/transactions/batch"):
-            // The phone's whole queue in one write, so Money is quit and relaunched once.
-            struct BatchRequest: Decodable { let transactions: [NewTransactionRequest] }
+            // The phone's whole queue in one write, so Money is quit and relaunched once. Older apps send only
+            // `transactions`; `updates` change and `deletes` remove transactions the phone added.
+            struct BatchRequest: Decodable {
+                let transactions: [NewTransactionRequest]
+                let updates: [NewTransactionRequest]?
+                let deletes: [DeleteTransactionRequest]?
+            }
             struct ResultError: Encodable { let status: Int; let code: String; let message: String }
             struct Result: Encodable { let clientId: String; let transactionId: String?; let error: ResultError? }
             struct Response: Encodable { let results: [Result] }
             let body = try decode(BatchRequest.self, request.body)
-            guard body.transactions.count <= Self.maxBatch else {
+            let changes = body.transactions.map(TransactionChange.create) + (body.updates ?? []).map(TransactionChange.update)
+                + (body.deletes ?? []).map(TransactionChange.delete)
+            guard changes.count <= Self.maxBatch else {
                 throw BridgeError.badRequest("Za dużo transakcji naraz (maks. \(Self.maxBatch)).",
                                              en: "Too many transactions at once (max \(Self.maxBatch)).")
             }
+            if (body.updates ?? []).contains(where: { $0.transactionId == nil }) {
+                throw BridgeError.badRequest("Zmiana bez transactionId.", en: "An update without a transactionId.")
+            }
             let language = Language(acceptLanguage: request.header("accept-language"))
-            let outcomes = try createTransactions(body.transactions)
-            return try .json(Response(results: zip(body.transactions, outcomes).map { request, outcome in
+            let outcomes = try applyChanges(changes)
+            // In the order sent: transactions, then updates, then deletes.
+            return try .json(Response(results: zip(changes, outcomes).map { change, outcome in
                 switch outcome {
                 case .success(let id):
-                    return Result(clientId: request.clientId, transactionId: id, error: nil)
+                    return Result(clientId: change.clientId, transactionId: id, error: nil)
                 case .failure(let e):
-                    return Result(clientId: request.clientId, transactionId: nil,
+                    return Result(clientId: change.clientId, transactionId: nil,
                                   error: ResultError(status: e.status, code: e.code, message: e.clientMessage(in: language)))
                 }
             }))
+        case ("GET", "/api/v1/cloud"):
+            return try .json(try cloudStatus())
         default:
             throw BridgeError.notFound("Nieznany adres \(request.method) \(request.path)", en: "Unknown endpoint \(request.method) \(request.path)")
         }
@@ -209,12 +222,16 @@ final class API {
     }
 
     func createTransactions(_ requests: [NewTransactionRequest]) throws -> [Swift.Result<String, BridgeError>] {
+        try applyChanges(requests.map(TransactionChange.create))
+    }
+
+    func applyChanges(_ changes: [TransactionChange]) throws -> [Swift.Result<String, BridgeError>] {
         let (location, model, syncModel) = try ensureSetup()
         let writer = TransactionWriter(
             location: location, model: model, syncModel: syncModel, config: config,
             app: controlsMoneyApp ? MoneyAppController(appURL: location.appURL) : nil,
             backups: BackupManager(directory: Paths.backups, keep: config.backupsToKeep))
-        let outcomes = try writer.create(requests, snapshot: try currentSnapshot())
+        let outcomes = try writer.apply(changes, snapshot: try currentSnapshot())
         snapshot = nil
         return outcomes
     }
@@ -238,6 +255,26 @@ final class API {
             Log.error("Couldn't put right the unfinished write: \(error)")
             return true
         }
+    }
+
+    /// Learned once: how Money's SyncKit names its rows doesn't change while the bridge runs.
+    private var syncConventions: SyncConventions?
+
+    func cloudStatus() throws -> CloudDTO {
+        let (location, _, _) = try ensureSetup()
+        guard let syncStore = location.syncStoreURL else {
+            throw BridgeError.setup("Nie znaleziono bazy synchronizacji Money (SyncKit).", en: "Money's sync database (SyncKit) not found.")
+        }
+        let snapshot = try currentSnapshot()
+        if syncConventions == nil {
+            syncConventions = try SyncConventions.learn(
+                syncStore: syncStore, knownTransactionIDs: snapshot.transactions.prefix(200).map(\.id))
+        }
+        let rows = try CloudStatus.waiting(syncStore: syncStore, conventions: syncConventions!,
+                                           entities: ["Transaction", "TransactionSplit"])
+        return CloudDTO(
+            moneyRunning: controlsMoneyApp && MoneyAppController(appURL: location.appURL).isRunning,
+            waiting: CloudStatus.transactions(rows, snapshot: snapshot, newState: config.syncNewState))
     }
 
     private struct StatusDTO: Encodable {

@@ -107,6 +107,8 @@ data class Split(
     val category: String? = null,
     val note: String? = null,
     val transferAccountId: String? = null,
+    /** A transfer's other side (older bridges don't send it). */
+    val transferTransactionId: String? = null,
 )
 
 @Serializable
@@ -153,9 +155,46 @@ data class Transaction(
     /** One unit of [originalCurrency] in [currency]. */
     val exchangeRate: String? = null,
     val investment: Investment? = null,
+    /**
+     * The phone may change or delete it: it was added from the phone and is still a plain one (one split, no
+     * security, not reconciled). Older bridges never set it.
+     */
+    val editable: Boolean = false,
 ) {
     val instant: Instant get() = runCatching { Instant.parse(date) }.getOrDefault(Instant.EPOCH)
     val amountValue: BigDecimal get() = amount.toBigDecimalOrNull() ?: BigDecimal.ZERO
+
+    /** This one and, for a transfer, its other side: a change or deletion on the phone covers both. */
+    val sides: List<String> get() = listOf(id) + splits.mapNotNull { it.transferTransactionId }.filter { it != id }
+
+    /**
+     * As the add form would send it, to change or delete it: a transfer goes from the account it leaves, an amount in
+     * another currency stays in it.
+     */
+    fun toRequest(clientId: String): NewTransactionRequest {
+        val signed = originalAmount?.toBigDecimalOrNull() ?: amountValue
+        val other = splits.singleOrNull()?.transferAccountId
+        val transfer = kind == NewTransactionRequest.TRANSFER && other != null
+        val outgoing = signed.signum() < 0
+        return NewTransactionRequest(
+            clientId = clientId,
+            transactionId = id,
+            accountId = if (transfer && !outgoing) other!! else accountId,
+            transferAccountId = if (!transfer) null else if (outgoing) other else accountId,
+            date = date,
+            kind = when {
+                transfer -> NewTransactionRequest.TRANSFER
+                outgoing -> Kind.EXPENSE.api
+                else -> Kind.INCOME.api
+            },
+            amount = signed.abs().toPlainString(),
+            categoryId = if (transfer) null else splits.singleOrNull()?.categoryId,
+            payeeName = payee,
+            note = note,
+            currency = originalCurrency,
+            exchangeRate = exchangeRate.takeIf { originalCurrency != null },
+        )
+    }
 }
 
 @Serializable
@@ -168,6 +207,8 @@ data class Snapshot(
     val writesEnabled: Boolean,
     /** False from bridges that can't add transfers between accounts (they reject them). */
     val writesTransfers: Boolean = false,
+    /** Transactions marked [Transaction.editable] can be changed and deleted (false from older bridges). */
+    val writesEdits: Boolean = false,
     val defaultCurrency: String? = null,
     /**
      * The currencies set up in Money, the default one first. Null from bridges that can only add transactions in the
@@ -234,6 +275,11 @@ data class NewTransactionRequest(
     val currency: String? = null,
     /** One unit of [currency] in the account's currency, "." separator. */
     val exchangeRate: String? = null,
+    /**
+     * Set to change a transaction the Mac has (either side of a transfer): it gets these values. [clientId] is then the
+     * change's own.
+     */
+    val transactionId: String? = null,
 ) {
     val isTransfer: Boolean get() = kind == TRANSFER
 
@@ -251,16 +297,76 @@ data class NewTransactionRequest(
     }
 }
 
-/** A transaction entered on the phone that the Mac hasn't confirmed yet. */
+/** `DELETE`s go in a batch's `deletes`: the transaction (a transfer loses both sides). */
+@Serializable
+data class DeleteTransactionRequest(val clientId: String, val transactionId: String)
+
+enum class PendingChange { CREATE, UPDATE, DELETE }
+
+/** A transaction entered, changed or deleted on the phone that the Mac hasn't confirmed yet. */
 @Serializable
 data class PendingTransaction(
+    /**
+     * What the Mac is to have: a new transaction; new values for one it has ([original] set, with
+     * [NewTransactionRequest.transactionId]); or for [delete] the one to delete, as it is.
+     */
     val request: NewTransactionRequest,
     val createdAt: Long,
     val attempts: Int = 0,
     /** Set when the bridge rejected the transaction; it won't be retried automatically. */
     val rejectedReason: String? = null,
     val lastError: String? = null,
-)
+    /** For a change or deletion: the transaction as the Mac has it, which balances leave out while this waits. */
+    val original: NewTransactionRequest? = null,
+    val delete: Boolean = false,
+    /** For a change or deletion: the Mac's transactions it replaces (a transfer's both sides). */
+    val replaces: List<String> = emptyList(),
+) {
+    val change: PendingChange
+        get() = when {
+            delete -> PendingChange.DELETE
+            original != null -> PendingChange.UPDATE
+            else -> PendingChange.CREATE
+        }
+
+    /** The Mac's transactions that lists leave out for this one; a rejected one leaves them shown, as they stay. */
+    val hides: List<String> get() = if (rejectedReason == null) replaces else emptyList()
+}
+
+/**
+ * `GET cloud`: what Money on the Mac hasn't uploaded to iCloud yet. The bridge only writes Money's database; Money
+ * sends the changes on its next sync.
+ */
+@Serializable
+data class CloudStatus(
+    /** Money only uploads while it runs. */
+    val moneyRunning: Boolean = false,
+    /** The oldest first. */
+    val waiting: List<CloudWaiting> = emptyList(),
+) {
+    private val byId by lazy { waiting.associateBy { it.transactionId } }
+
+    fun waiting(transactionId: String): CloudWaiting? = byId[transactionId]
+
+    /** Changes that should have been uploaded by [now]: Money usually sends them within a minute or two. */
+    fun overdue(now: Instant): List<CloudWaiting> =
+        waiting.filter { w -> w.sinceInstant?.let { it.plus(OVERDUE).isBefore(now) } ?: false }
+
+    companion object {
+        val OVERDUE: java.time.Duration = java.time.Duration.ofMinutes(10)
+    }
+}
+
+@Serializable
+data class CloudWaiting(
+    val transactionId: String,
+    /** "new", "changed" or "deleted". */
+    val change: String,
+    /** When it was saved on the Mac (ISO instant). */
+    val since: String? = null,
+) {
+    val sinceInstant: Instant? get() = since?.let { runCatching { Instant.parse(it) }.getOrNull() }
+}
 
 /** An image from Money, encoded as PNG or JPEG. */
 @Serializable
@@ -295,14 +401,21 @@ data class ApiErrorBody(val error: ApiErrorInner)
 @Serializable
 data class ApiErrorInner(val code: String, val message: String)
 
-/** `POST transactions/batch`: the queue in one write, so Money on the Mac is quit and relaunched once. */
+/**
+ * `POST transactions/batch`: the queue in one write, so Money on the Mac is quit and relaunched once. Bridges older
+ * than editing ignore [updates] and [deletes] (and never mark a transaction editable, so there are none).
+ */
 @Serializable
-data class NewTransactionBatch(val transactions: List<NewTransactionRequest>)
+data class NewTransactionBatch(
+    val transactions: List<NewTransactionRequest>,
+    val updates: List<NewTransactionRequest> = emptyList(),
+    val deletes: List<DeleteTransactionRequest> = emptyList(),
+)
 
 @Serializable
 data class BatchResults(val results: List<BatchResult>)
 
-/** One transaction of a batch: written ([transactionId]) or refused ([error], with the status it would have had alone). */
+/** One change of a batch: written ([transactionId], the transaction it added, changed or deleted) or refused ([error], with the status it would have had alone). */
 @Serializable
 data class BatchResult(val clientId: String, val transactionId: String? = null, val error: BatchError? = null)
 

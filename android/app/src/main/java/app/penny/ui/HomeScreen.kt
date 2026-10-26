@@ -34,6 +34,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -80,6 +82,8 @@ fun HomeScreen(
     onAdd: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHiddenAccounts: () -> Unit,
+    onEdit: (EditTarget) -> Unit,
+    snackbar: SnackbarHostState,
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
     val hidden by hiddenAccounts.collectAsStateWithLifecycle()
@@ -121,7 +125,8 @@ fun HomeScreen(
                         }
                     },
                 )
-                StatusBanner(app.status)
+                StatusBanner(app.status, app.updatedAt)
+                CloudBanner(app.cloud)
                 if (syncMode == SyncMode.MANUAL) {
                     val waiting = app.pending.filter { it.rejectedReason == null }
                     PendingSyncBanner(
@@ -139,6 +144,7 @@ fun HomeScreen(
                 }
             }
         },
+        snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
             // The report has no list to add to, and the button would cover its charts.
             if (app.snapshot != null && tab != 2) {
@@ -158,9 +164,9 @@ fun HomeScreen(
             when (tab) {
                 0 -> AccountsList(
                     app.snapshotWithPending?.accounts, app.snapshot?.mainCurrency, rates.rates, valuation, hidden, app.status,
-                    onOpenAccount, onOpenHiddenAccounts,
+                    app.updatedAt, onOpenAccount, onOpenHiddenAccounts,
                 )
-                1 -> RecentList(repository, recent)
+                1 -> RecentList(repository, recent, onEdit)
                 else -> ReportList(repository, report)
             }
         }
@@ -197,6 +203,8 @@ private fun AccountsList(
     valuation: Valuation?,
     hidden: HiddenAccounts,
     status: SyncStatus,
+    /** When the balances were downloaded (epoch ms). */
+    updatedAt: Long?,
     onOpen: (String) -> Unit,
     onOpenHiddenAccounts: () -> Unit,
 ) {
@@ -222,7 +230,7 @@ private fun AccountsList(
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         item(key = "totals") {
             TotalsCard(open, ::value, mainCurrency, rates, securitiesExcluded = valuation?.knowsHoldings != true,
-                hasSecurities = open.any { it.id in securities })
+                hasSecurities = open.any { it.id in securities }, updatedAt = updatedAt)
         }
         open.groupBy { it.folder ?: defaultFolder }.forEach { (folder, list) ->
             val sums = list.groupBy { it.currency }.map { (cur, a) -> Format.money(a.sumOf(::value), cur) }
@@ -261,6 +269,7 @@ private fun TotalsCard(
     /** The bridge doesn't send holdings, so investment accounts count their cash only. */
     securitiesExcluded: Boolean,
     hasSecurities: Boolean,
+    updatedAt: Long?,
 ) {
     val totals = accounts.groupBy { it.currency }
         .mapValues { (_, list) -> list.fold(BigDecimal.ZERO) { acc, a -> acc + value(a) } }
@@ -308,6 +317,13 @@ private fun TotalsCard(
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                 )
             }
+            rememberAgo(updatedAt)?.let { ago ->
+                Text(
+                    stringResource(R.string.updated_ago, ago),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                )
+            }
         }
     }
 }
@@ -348,7 +364,7 @@ private fun AccountRow(
 }
 
 @Composable
-private fun RecentList(repository: Repository, vm: TransactionsViewModel) {
+private fun RecentList(repository: Repository, vm: TransactionsViewModel, onEdit: (EditTarget) -> Unit) {
     val app by repository.state.collectAsStateWithLifecycle()
     val list by vm.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -358,11 +374,14 @@ private fun RecentList(repository: Repository, vm: TransactionsViewModel) {
     val pending = matchingPending(app.pending, list.query, app.snapshot)
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
         searchSummary(list, pending.size)
-        transactionItems(list.items, pending, app.snapshot, repository, showAccount = true) { selected = it }
+        transactionItems(
+            list.items, pending, app.snapshot, repository, showAccount = true,
+            replaced = app.replaced, cloud = app.cloud, onEdit = onEdit,
+        ) { selected = it }
         listFooter(list)
     }
     selected?.let { tx ->
-        TransactionDetailsSheet(tx, repository, onSelect = { selected = it }, onDismiss = { selected = null })
+        TransactionDetailsSheet(tx, repository, onSelect = { selected = it }, onDismiss = { selected = null }, onEdit = onEdit)
     }
 }
 

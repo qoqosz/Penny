@@ -283,4 +283,59 @@
     <string name="pin_reset_title">Reset app lock?</string>
     <string name="pin_reset_text">Penny will disconnect from the Mac, remove downloaded data and turn the lock off. You\'ll need to pair with the Mac again. Pending transactions are kept.</string>
     <string name="pin_reset_confirm">Reset</string>
+    <!-- Editing and deleting -->
+    <string name="action_edit">Edit</string>
+    <string name="action_undo">Undo</string>
+    <string name="edit_title">Edit transaction</string>
+    <string name="edit_missing">This transaction isn\'t on the phone anymore. Refresh and try again.</string>
+    <string name="edit_footer">The change will reach Money on the Mac at the next connection, and from there iCloud.</string>
+    <string name="edit_transfer_locked">A transfer stays a transfer. To make it an expense or income, delete it and add a new transaction.</string>
+    <string name="edit_no_transfer">To make this a transfer, delete it and add a new transfer.</string>
+    <string name="delete_title">Delete transaction?</string>
+    <string name="delete_text">It will be deleted in Money on the Mac at the next connection, and from there in iCloud.</string>
+    <string name="delete_transfer_text">Both sides of the transfer will be deleted in Money on the Mac at the next connection, and from there in iCloud.</string>
+    <string name="added_snackbar">Transaction added</string>
+    <string name="pending_change_waiting">Change waiting to be sent</string>
+    <string name="pending_delete_waiting">Deletion waiting to be sent</string>
+    <string name="pending_change_rejected_title">Change rejected</string>
+    <string name="pending_delete_rejected_title">Deletion rejected</string>
+    <string name="pending_explainer_change">The change will be sent to Money once the phone connects to the Mac.</string>
+    <string name="pending_explainer_change_manual">The change will be sent to Money when you tap Sync now on the home screen.</string>
+    <string name="pending_explainer_delete">The transaction will be deleted in Money once the phone connects to the Mac.</string>
+    <string name="pending_explainer_delete_manual">The transaction will be deleted in Money when you tap Sync now on the home screen.</string>
+    <string name="pending_discard_change">Discard change</string>
+    <string name="pending_keep">Don\'t delete</string>
+
+    <!-- Quick add -->
+    <string name="widget_add_description">Add a transaction in one tap</string>
+
+    <!-- Data age -->
+    <string name="ago_now">just now</string>
+    <plurals name="ago_minutes">
+        <item quantity="one">%d minute ago</item>
+        <item quantity="other">%d minutes ago</item>
+    </plurals>
+    <plurals name="ago_hours">
+        <item quantity="one">%d hour ago</item>
+        <item quantity="other">%d hours ago</item>
+    </plurals>
+    <plurals name="ago_days">
+        <item quantity="one">%d day ago</item>
+        <item quantity="other">%d days ago</item>
+    </plurals>
+    <string name="updated_ago">Updated %s</string>
+    <string name="status_offline_age">Mac unavailable. Showing data downloaded %s.</string>
+    <string name="status_data_age">Data downloaded %s.</string>
+
+    <!-- iCloud -->
+    <string name="details_icloud">iCloud</string>
+    <string name="details_icloud_waiting">Money on the Mac hasn\'t uploaded it yet (saved %s)</string>
+    <string name="details_icloud_stopped">Money isn\'t running on the Mac, so it can\'t upload it (saved %s)</string>
+    <string name="details_icloud_done">Uploaded by Money on the Mac</string>
+    <string name="cloud_waiting">Not in iCloud yet</string>
+    <plurals name="cloud_overdue">
+        <item quantity="one">%d change on the Mac hasn\'t reached iCloud for over 10 minutes. Check Money on the Mac.</item>
+        <item quantity="other">%d changes on the Mac haven\'t reached iCloud for over 10 minutes. Check Money on the Mac.</item>
+    </plurals>
+    <string name="cloud_money_stopped">Money isn\'t running on the Mac.</string>
 </resources>

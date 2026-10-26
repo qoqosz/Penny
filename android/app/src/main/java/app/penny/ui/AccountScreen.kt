@@ -21,6 +21,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -56,6 +58,8 @@ fun AccountScreen(
     transactions: TransactionsViewModel,
     onBack: () -> Unit,
     onAdd: () -> Unit,
+    onEdit: (EditTarget) -> Unit,
+    snackbar: SnackbarHostState,
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
     val valuation by repository.valuation.collectAsStateWithLifecycle()
@@ -94,7 +98,7 @@ fun AccountScreen(
                     },
                     actions = { if (showsTransactions) SearchAction { searching = true } },
                 )
-                StatusBanner(app.status)
+                StatusBanner(app.status, app.updatedAt)
                 if (investment) {
                     PrimaryTabRow(selectedTabIndex = tab) {
                         Tab(selected = tab == 0, onClick = { closeSearch(); tab = 0 }, text = { Text(stringResource(R.string.portfolio)) })
@@ -103,6 +107,7 @@ fun AccountScreen(
                 }
             }
         },
+        snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
             if (account != null && !account.closed) {
                 FloatingActionButton(onClick = onAdd) { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.add_transaction)) }
@@ -137,14 +142,17 @@ fun AccountScreen(
                                 cashOnly = account.hasInvestments && valuation?.knowsHoldings != true)
                         }
                     }
-                    transactionItems(list.items, shownPending, app.snapshot, repository, showAccount = false, accountId = accountId) { selected = it }
+                    transactionItems(
+                        list.items, shownPending, app.snapshot, repository, showAccount = false, accountId = accountId,
+                        replaced = app.replaced, cloud = app.cloud, onEdit = onEdit,
+                    ) { selected = it }
                     listFooter(list)
                 }
             }
         }
     }
     selected?.let { tx ->
-        TransactionDetailsSheet(tx, repository, onSelect = { selected = it }, onDismiss = { selected = null })
+        TransactionDetailsSheet(tx, repository, onSelect = { selected = it }, onDismiss = { selected = null }, onEdit = onEdit)
     }
 }
 
