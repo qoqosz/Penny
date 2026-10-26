@@ -18,6 +18,13 @@
         <item quantity="other">%d transakcji</item>
     </plurals>
 
+    <plurals name="account_pending_count">
+        <item quantity="one">%d czeka na synchronizację</item>
+        <item quantity="few">%d czekają na synchronizację</item>
+        <item quantity="many">%d czeka na synchronizację</item>
+        <item quantity="other">%d czeka na synchronizację</item>
+    </plurals>
+
     <!-- Errors -->
     <string name="error_unreachable">Brak połączenia z Makiem. Sprawdź Wi-Fi i czy most działa.</string>
     <string name="error_not_paired">Nie sparowano z Makiem</string>
@@ -114,7 +121,6 @@
     <string name="transfer_to">Przelew → %s</string>
     <string name="transfer_from">Przelew ← %s</string>
     <string name="split_count">Podzielona (%d)</string>
-    <string name="pending_header">Oczekujące (%d)</string>
     <string name="pending_waiting">Oczekuje</string>
     <string name="pending_rejected">Odrzucona</string>
     <string name="pending_rejected_reason">Odrzucona: %s</string>

@@ -154,11 +154,12 @@ class Repository(
 
     /**
      * Sends queued transactions (when [push]; by default only in automatic mode), then reloads accounts and categories
-     * and the offline copy of transactions.
+     * and the offline copy of transactions. Only a refresh the user asked for ([shown]) or the first download shows as
+     * [SyncStatus.Syncing]; the ones on every return to the app and after each change run quietly.
      */
-    suspend fun refresh(push: Boolean = autoSync) = syncMutex.withLock {
+    suspend fun refresh(push: Boolean = autoSync, shown: Boolean = false) = syncMutex.withLock {
         val bridge = settings.current()?.let { pinIfOffered(it) } ?: return@withLock
-        _state.update { it.copy(status = SyncStatus.Syncing) }
+        if (shown || _state.value.snapshot == null) _state.update { it.copy(status = SyncStatus.Syncing) }
         val status = try {
             val connection = withReconnect(bridge) { c -> if (push) pushPending(c); c }
             val cached = _state.value.snapshot
@@ -186,7 +187,7 @@ class Repository(
         } catch (e: UntrustedBridgeException) {
             SyncStatus.Untrusted
         } catch (e: CancellationException) {
-            _state.update { it.copy(status = SyncStatus.Idle) }
+            _state.update { it.copy(status = if (it.status == SyncStatus.Syncing) SyncStatus.Idle else it.status) }
             throw e
         } catch (e: Exception) {
             // Never left at Syncing, and never a crash: refresh runs on every return to the app.
@@ -261,7 +262,7 @@ class Repository(
     }
 
     /** Sends queued transactions now, whatever the sync mode, then reloads. */
-    suspend fun syncNow() = refresh(push = true)
+    suspend fun syncNow() = refresh(push = true, shown = true)
 
     /** Background sync entry point. Returns true when nothing is left to retry. */
     suspend fun syncInBackground(): Boolean {

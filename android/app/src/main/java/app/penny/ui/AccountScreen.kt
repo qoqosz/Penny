@@ -116,12 +116,12 @@ fun AccountScreen(
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = app.status == SyncStatus.Syncing,
-            onRefresh = { scope.launch { repository.refresh(); transactions.reload() } },
+            onRefresh = { scope.launch { repository.refresh(shown = true); transactions.reload() } },
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
             if (!showsTransactions) {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-                    item(key = "header") { BalanceCard(account!!, securities, list.total, cashOnly = false) }
+                    item(key = "header") { BalanceCard(account!!, securities, list.total, pending.size, cashOnly = false) }
                     if (holdings.isEmpty()) {
                         item(key = "empty") { EmptyState(stringResource(R.string.portfolio_empty)) }
                     } else {
@@ -138,7 +138,7 @@ fun AccountScreen(
                     // While searching, the count of matches takes the place of the balance.
                     if (account != null && !investment && !list.searching) {
                         item(key = "header") {
-                            BalanceCard(account, securities, list.total,
+                            BalanceCard(account, securities, list.total, pending.size,
                                 cashOnly = account.hasInvestments && valuation?.knowsHoldings != true)
                         }
                     }
@@ -163,6 +163,8 @@ private fun BalanceCard(
     /** The securities at the latest prices, or null when it holds none. */
     securities: BigDecimal?,
     transactionCount: Int,
+    /** Queued on the phone, not yet written by the Mac. */
+    pendingCount: Int,
     /** The bridge doesn't send holdings, so only the cash is known. */
     cashOnly: Boolean,
 ) {
@@ -188,7 +190,8 @@ private fun BalanceCard(
             }
             Text(
                 listOfNotNull(
-                    pluralStringResource(R.plurals.transaction_count, transactionCount, transactionCount),
+                    pluralStringResource(R.plurals.transaction_count, transactionCount, transactionCount) +
+                        if (pendingCount > 0) " (" + pluralStringResource(R.plurals.account_pending_count, pendingCount, pendingCount) + ")" else "",
                     stringResource(R.string.account_closed).takeIf { account.closed },
                 ).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,

@@ -382,7 +382,7 @@ fun ListRow(
 }
 
 /**
- * Pending transactions first, then confirmed ones grouped by day. Those that a queued change or deletion replaces
+ * Pending and confirmed transactions grouped by day, the pending ones first in each. Confirmed ones that a queued change or deletion replaces
  * ([AppState.replaced]) are left out; the pending ones show instead.
  */
 fun LazyListScope.transactionItems(
@@ -398,14 +398,16 @@ fun LazyListScope.transactionItems(
     onEdit: (EditTarget) -> Unit = {},
     onOpen: (Transaction) -> Unit,
 ) {
-    if (pending.isNotEmpty()) {
-        item(key = "pending-header") { SectionHeader(stringResource(R.string.pending_header, pending.size)) }
-        items(pending, key = { "p-" + it.request.clientId }) { PendingRow(it, snapshot, repository, accountId, onEdit) }
-    }
     val shown = if (replaced.isEmpty()) transactions else transactions.filter { it.id !in replaced }
-    shown.groupBy { Format.localDate(it.instant) }.forEach { (day, dayItems) ->
+    val confirmedByDay = shown.groupBy { Format.localDate(it.instant) }
+    val pendingByDay = pending.groupBy {
+        Format.localDate(runCatching { Instant.parse(it.request.date) }.getOrDefault(Instant.EPOCH))
+    }
+    (confirmedByDay.keys + pendingByDay.keys).sortedDescending().forEach { day ->
         item(key = "d-$day") { SectionHeader(Format.dayHeader(day)) }
-        items(dayItems, key = { "t-" + it.id }) { TransactionRow(it, snapshot, repository, showAccount, cloud, onOpen) }
+        // Within a day the queued ones come first: they were added last.
+        items(pendingByDay[day].orEmpty(), key = { "p-" + it.request.clientId }) { PendingRow(it, snapshot, repository, accountId, onEdit) }
+        items(confirmedByDay[day].orEmpty(), key = { "t-" + it.id }) { TransactionRow(it, snapshot, repository, showAccount, cloud, onOpen) }
     }
 }
 

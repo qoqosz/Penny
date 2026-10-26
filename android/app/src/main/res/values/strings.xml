@@ -18,6 +18,11 @@
         <item quantity="other">%d transactions</item>
     </plurals>
 
+    <plurals name="account_pending_count">
+        <item quantity="one">%d waiting to sync</item>
+        <item quantity="other">%d waiting to sync</item>
+    </plurals>
+
     <!-- Errors -->
     <string name="error_unreachable">Can\'t reach the Mac. Check Wi-Fi and that the bridge is running.</string>
     <string name="error_not_paired">Not paired with a Mac</string>
@@ -110,7 +115,6 @@
     <string name="transfer_to">Transfer → %s</string>
     <string name="transfer_from">Transfer ← %s</string>
     <string name="split_count">Split (%d)</string>
-    <string name="pending_header">Pending (%d)</string>
     <string name="pending_waiting">Pending</string>
     <string name="pending_rejected">Rejected</string>
     <string name="pending_rejected_reason">Rejected: %s</string>

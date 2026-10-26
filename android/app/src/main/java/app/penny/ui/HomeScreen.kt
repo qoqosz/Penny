@@ -116,7 +116,7 @@ fun HomeScreen(
                         if (syncing) {
                             CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
                         } else {
-                            IconButton(onClick = { scope.launch { repository.refresh() } }) {
+                            IconButton(onClick = { scope.launch { repository.refresh(shown = true) } }) {
                                 Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.action_refresh))
                             }
                         }
@@ -158,7 +158,7 @@ fun HomeScreen(
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = syncing,
-            onRefresh = { scope.launch { repository.refresh() } },
+            onRefresh = { scope.launch { repository.refresh(shown = true) } },
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
             when (tab) {
