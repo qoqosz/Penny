@@ -50,6 +50,7 @@ private object Routes {
     const val EDIT = "edit?transactionId={transactionId}&clientId={clientId}"
     const val SETTINGS = "settings"
     const val HIDDEN_ACCOUNTS = "settings/hidden"
+    const val ACCOUNT_ORDER = "settings/order"
     const val CURRENCIES = "settings/currencies"
 
     fun account(id: String) = "account/${android.net.Uri.encode(id)}"
@@ -182,6 +183,7 @@ private fun Screens(
                 recent = vm,
                 report = report,
                 hiddenAccounts = app.preferences.hidden,
+                accountOrder = app.preferences.accountOrder,
                 onOpenAccount = { nav.navigate(Routes.account(it)) },
                 onAdd = { nav.navigate(Routes.add(null)) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
@@ -216,6 +218,7 @@ private fun Screens(
             AddTransactionScreen(
                 repository = repository,
                 hiddenAccounts = app.preferences.hidden,
+                accountOrder = app.preferences.accountOrder,
                 vm = vm,
                 onDone = { nav.popBackStack() },
                 onSaved = ::saved,
@@ -236,6 +239,7 @@ private fun Screens(
             AddTransactionScreen(
                 repository = repository,
                 hiddenAccounts = app.preferences.hidden,
+                accountOrder = app.preferences.accountOrder,
                 vm = vm,
                 onDone = { nav.popBackStack() },
                 onSaved = ::saved,
@@ -250,6 +254,7 @@ private fun Screens(
                 onBack = { nav.popBackStack() },
                 onUnpaired = toSetup,
                 onOpenHiddenAccounts = { nav.navigate(Routes.HIDDEN_ACCOUNTS) },
+                onOpenAccountOrder = { nav.navigate(Routes.ACCOUNT_ORDER) },
                 onOpenCurrencies = { nav.navigate(Routes.CURRENCIES) },
             )
         }
@@ -258,6 +263,9 @@ private fun Screens(
         }
         composable(Routes.HIDDEN_ACCOUNTS) {
             HiddenAccountsScreen(preferences = app.preferences, repository = repository, onBack = { nav.popBackStack() })
+        }
+        composable(Routes.ACCOUNT_ORDER) {
+            AccountOrderScreen(preferences = app.preferences, repository = repository, onBack = { nav.popBackStack() })
         }
     }
 }

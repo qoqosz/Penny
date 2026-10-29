@@ -29,6 +29,9 @@ data class Account(
     /** Accounts the user hid in settings, alone or with their folder, stay out of lists, totals and the account picker. */
     fun isHidden(hidden: HiddenAccounts): Boolean =
         id in hidden.accounts || (folderId != null && folderId in hidden.folders)
+
+    /** The group the account is listed in: its Money folder (by name from bridges before folder IDs), "" outside folders. */
+    val groupKey: String get() = folderId ?: folder ?: ""
 }
 
 @Serializable

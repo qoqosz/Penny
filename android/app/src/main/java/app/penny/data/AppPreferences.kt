@@ -24,6 +24,24 @@ enum class SyncMode { AUTOMATIC, MANUAL }
 /** What the user hid in settings: whole Money folders and single accounts, by ID. */
 data class HiddenAccounts(val folders: Set<String> = emptySet(), val accounts: Set<String> = emptySet())
 
+/**
+ * The user's order of account groups (Money folders, by [Account.groupKey]) and of accounts, by ID. Empty keeps Money's
+ * order. Groups and accounts it doesn't list (added in Money later) follow the listed ones in Money's order.
+ */
+data class AccountOrder(val groups: List<String> = emptyList(), val accounts: List<String> = emptyList()) {
+    val isCustom: Boolean get() = groups.isNotEmpty() || accounts.isNotEmpty()
+}
+
+/** Accounts grouped by folder, the groups and the accounts in each in [order]. */
+fun List<Account>.ordered(order: AccountOrder): List<Account> {
+    if (!order.isCustom) return this
+    fun rank(list: List<String>, key: String) = list.indexOf(key).let { if (it < 0) Int.MAX_VALUE else it }
+    // groupBy keeps Money's order of the groups, and the sorts are stable.
+    return groupBy { it.groupKey }.entries
+        .sortedBy { rank(order.groups, it.key) }
+        .flatMap { (_, accounts) -> accounts.sortedBy { rank(order.accounts, it.id) } }
+}
+
 /** Where the add form keeps the account it last added a transaction to. */
 interface LastAccount {
     var lastAccountId: String?
@@ -70,6 +88,23 @@ class AppPreferences(private val prefs: SharedPreferences) : LastAccount {
         _hidden.value = _hidden.value.copy(accounts = accounts)
     }
 
+    private val _order = MutableStateFlow(
+        AccountOrder(groups = prefs.getString(KEY_ORDER_GROUPS, null).toIdList(), accounts = prefs.getString(KEY_ORDER_ACCOUNTS, null).toIdList())
+    )
+    /** How the accounts are ordered on the home screen and in the add form. */
+    val accountOrder: StateFlow<AccountOrder> = _order.asStateFlow()
+
+    fun setAccountOrder(order: AccountOrder) {
+        prefs.edit {
+            putString(KEY_ORDER_GROUPS, order.groups.joinToString("\n"))
+            putString(KEY_ORDER_ACCOUNTS, order.accounts.joinToString("\n"))
+        }
+        _order.value = order
+    }
+
+    // IDs and folder names never contain line breaks. The group outside folders is "".
+    private fun String?.toIdList() = this?.takeIf { it.isNotEmpty() }?.split('\n').orEmpty()
+
     /** The add form starts in this account. */
     override var lastAccountId: String?
         get() = prefs.getString(KEY_LAST_ACCOUNT, null)
@@ -104,5 +139,7 @@ class AppPreferences(private val prefs: SharedPreferences) : LastAccount {
         const val KEY_HIDDEN_FOLDERS = "hidden_folders"
         const val KEY_HIDDEN_ACCOUNTS = "hidden_accounts"
         const val KEY_LAST_ACCOUNT = "last_account"
+        const val KEY_ORDER_GROUPS = "order_groups"
+        const val KEY_ORDER_ACCOUNTS = "order_accounts"
     }
 }

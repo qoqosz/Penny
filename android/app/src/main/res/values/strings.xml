@@ -229,6 +229,15 @@
     <string name="hidden_accounts_summary">Hidden accounts don\'t appear on the main screen, in the totals or when adding a transaction. Hiding a folder also hides accounts added to it later.</string>
     <string name="hidden_accounts_empty">Accounts appear here once they\'ve been downloaded from the Mac.</string>
     <string name="hidden_folders_old_bridge">To hide whole folders, update Penny Bridge on the Mac (penny-bridge install), then refresh.</string>
+    <string name="account_order">Account order</string>
+    <string name="account_order_money">As in Money</string>
+    <string name="account_order_custom">Custom</string>
+    <string name="account_order_reset">Restore Money\'s order</string>
+    <string name="account_order_summary">Drag the handles to change the order of folders and accounts on the main screen and when adding a transaction. Accounts added in Money later go to the end of their folder.</string>
+    <string name="account_hidden">Hidden</string>
+    <string name="action_reorder">Drag to reorder</string>
+    <string name="action_move_up">Move up</string>
+    <string name="action_move_down">Move down</string>
     <string name="hidden_with_folder">Hidden with its folder</string>
     <plurals name="account_count">
         <item quantity="one">%d account</item>

@@ -34,6 +34,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
 import app.penny.data.AppPreferences
 import app.penny.data.Repository
+import app.penny.data.ordered
 
 /** Folders and accounts to leave out of the app, grouped the way the home screen shows them. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,9 +42,10 @@ import app.penny.data.Repository
 fun HiddenAccountsScreen(preferences: AppPreferences, repository: Repository, onBack: () -> Unit) {
     val hidden by preferences.hidden.collectAsStateWithLifecycle()
     val app by repository.state.collectAsStateWithLifecycle()
-    val accounts = app.snapshot?.accounts.orEmpty()
-    // Accounts outside folders come last.
-    val groups = accounts.groupBy { it.folderId }.toList().sortedBy { it.first == null }
+    val order by preferences.accountOrder.collectAsStateWithLifecycle()
+    val accounts = app.snapshot?.accounts.orEmpty().ordered(order)
+    // In the user's order, else accounts outside folders come last.
+    val groups = accounts.groupBy { it.folderId }.toList().let { if (order.isCustom) it else it.sortedBy { g -> g.first == null } }
     // Bridges before folder IDs send only folder names, which can't be used to hide anything.
     val oldBridge = accounts.any { it.folder != null && it.folderId == null }
 

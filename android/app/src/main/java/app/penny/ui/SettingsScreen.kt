@@ -69,6 +69,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onUnpaired: () -> Unit,
     onOpenHiddenAccounts: () -> Unit,
+    onOpenAccountOrder: () -> Unit,
     onOpenCurrencies: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -76,6 +77,7 @@ fun SettingsScreen(
     val theme by preferences.theme.collectAsStateWithLifecycle()
     val syncMode by preferences.syncMode.collectAsStateWithLifecycle()
     val hidden by preferences.hidden.collectAsStateWithLifecycle()
+    val accountOrder by preferences.accountOrder.collectAsStateWithLifecycle()
     val appState by repository.state.collectAsStateWithLifecycle()
     val lockConfig by lock.config.collectAsStateWithLifecycle()
     val bridge by settings.bridge.collectAsStateWithLifecycle(initialValue = null)
@@ -144,6 +146,11 @@ fun SettingsScreen(
                     else -> pluralStringResource(R.plurals.hidden_accounts_count, hiddenCount, hiddenCount)
                 },
                 onClick = onOpenHiddenAccounts,
+            )
+            SettingRow(
+                title = stringResource(R.string.account_order),
+                subtitle = stringResource(if (accountOrder.isCustom) R.string.account_order_custom else R.string.account_order_money),
+                onClick = onOpenAccountOrder,
             )
             val currencies = appState.snapshot?.allCurrencies.orEmpty()
             SettingRow(

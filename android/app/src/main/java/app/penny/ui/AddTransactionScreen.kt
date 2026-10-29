@@ -70,7 +70,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
 import app.penny.data.Account
 import app.penny.data.Category
+import app.penny.data.AccountOrder
 import app.penny.data.HiddenAccounts
+import app.penny.data.ordered
 import app.penny.data.IconStore
 import app.penny.data.Payee
 import app.penny.data.Kind
@@ -84,6 +86,7 @@ import java.time.ZoneOffset
 fun AddTransactionScreen(
     repository: Repository,
     hiddenAccounts: StateFlow<HiddenAccounts>,
+    accountOrder: StateFlow<AccountOrder>,
     vm: AddTransactionViewModel,
     /** Closes the form without saving, or after a deletion. */
     onDone: () -> Unit,
@@ -92,6 +95,7 @@ fun AddTransactionScreen(
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
     val hidden by hiddenAccounts.collectAsStateWithLifecycle()
+    val order by accountOrder.collectAsStateWithLifecycle()
     val form by vm.form.collectAsStateWithLifecycle()
     // Balances in the account picker include the queued transactions.
     val snapshot = app.snapshotWithPending
@@ -146,7 +150,7 @@ fun AddTransactionScreen(
             }
             AccountPicker(
                 // A hidden account stays listed when it's preselected (opened from its own screen).
-                accounts = snapshot.accounts.filter { !it.closed && (!it.isHidden(hidden) || it.id == form.accountId) },
+                accounts = snapshot.accounts.ordered(order).filter { !it.closed && (!it.isHidden(hidden) || it.id == form.accountId) },
                 selectedId = form.accountId,
                 onSelect = { id -> vm.update { it.copy(accountId = id) } },
             )
@@ -242,7 +246,7 @@ fun AddTransactionScreen(
                 categories = snapshot.categories.filter { c -> Kind.entries.any { it.api == c.kind } },
                 // Like Money, the other accounts follow as transfer targets: open ones in the same currency,
                 // hidden ones too (hiding only declutters the home screen).
-                accounts = snapshot.accounts.filter {
+                accounts = snapshot.accounts.ordered(order).filter {
                     !it.closed && it.id != form.accountId && it.currency == account?.currency
                 },
                 transfersUnsupported = !snapshot.writesTransfers,

@@ -236,6 +236,15 @@
     <string name="hidden_accounts_summary">Ukryte konta nie są widoczne na ekranie głównym, w sumach ani przy dodawaniu transakcji. Ukrycie folderu ukrywa też konta dodane do niego później.</string>
     <string name="hidden_accounts_empty">Konta pojawią się tutaj po pobraniu ich z Maca.</string>
     <string name="hidden_folders_old_bridge">Aby ukrywać całe foldery, zaktualizuj Penny Bridge na Macu (penny-bridge install), a potem odśwież.</string>
+    <string name="account_order">Kolejność kont</string>
+    <string name="account_order_money">Jak w Money</string>
+    <string name="account_order_custom">Własna</string>
+    <string name="account_order_reset">Przywróć kolejność z Money</string>
+    <string name="account_order_summary">Przeciągnij uchwyty, aby zmienić kolejność folderów i kont na ekranie głównym i przy dodawaniu transakcji. Konta dodane później w Money trafiają na koniec swojego folderu.</string>
+    <string name="account_hidden">Ukryte</string>
+    <string name="action_reorder">Przeciągnij, aby zmienić kolejność</string>
+    <string name="action_move_up">Przenieś w górę</string>
+    <string name="action_move_down">Przenieś w dół</string>
     <string name="hidden_with_folder">Ukryte razem z folderem</string>
     <plurals name="account_count">
         <item quantity="one">%d konto</item>

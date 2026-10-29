@@ -60,7 +60,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.penny.R
 import app.penny.data.Account
 import app.penny.data.ExchangeRates
+import app.penny.data.AccountOrder
 import app.penny.data.HiddenAccounts
+import app.penny.data.ordered
 import app.penny.data.Repository
 import app.penny.data.SyncMode
 import app.penny.data.SyncStatus
@@ -78,6 +80,7 @@ fun HomeScreen(
     recent: TransactionsViewModel,
     report: ReportViewModel,
     hiddenAccounts: StateFlow<HiddenAccounts>,
+    accountOrder: StateFlow<AccountOrder>,
     onOpenAccount: (String) -> Unit,
     onAdd: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -87,6 +90,7 @@ fun HomeScreen(
 ) {
     val app by repository.state.collectAsStateWithLifecycle()
     val hidden by hiddenAccounts.collectAsStateWithLifecycle()
+    val order by accountOrder.collectAsStateWithLifecycle()
     val rates by repository.rates.state.collectAsStateWithLifecycle()
     val valuation by repository.valuation.collectAsStateWithLifecycle()
     val syncMode by repository.syncMode.collectAsStateWithLifecycle()
@@ -163,7 +167,7 @@ fun HomeScreen(
         ) {
             when (tab) {
                 0 -> AccountsList(
-                    app.snapshotWithPending?.accounts, app.snapshot?.mainCurrency, rates.rates, valuation, hidden, app.status,
+                    app.snapshotWithPending?.accounts?.ordered(order), app.snapshot?.mainCurrency, rates.rates, valuation, hidden, app.status,
                     app.updatedAt, onOpenAccount, onOpenHiddenAccounts,
                 )
                 1 -> RecentList(repository, recent, onEdit)
