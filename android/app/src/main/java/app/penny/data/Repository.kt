@@ -161,10 +161,14 @@ class Repository(
         val bridge = settings.current()?.let { pinIfOffered(it) } ?: return@withLock
         if (shown || _state.value.snapshot == null) _state.update { it.copy(status = SyncStatus.Syncing) }
         val status = try {
-            val connection = withReconnect(bridge) { c -> if (push) pushPending(c); c }
             val cached = _state.value.snapshot
-            // Null (304) while the Mac's snapshot is still the cached one.
-            val snapshot = client.snapshotIfChanged(connection, cached?.etag) ?: cached ?: client.snapshot(connection)
+            // The snapshot request is inside withReconnect too, so a Mac with a new address is found even when there
+            // is nothing to send. Null (304) while the Mac's snapshot is still the cached one.
+            val (connection, fetched) = withReconnect(bridge) { c ->
+                if (push) pushPending(c)
+                c to client.snapshotIfChanged(c, cached?.etag)
+            }
+            val snapshot = fetched ?: cached ?: client.snapshot(connection)
             val changed = snapshot.generation != cached?.generation
             if (snapshot !== cached) cache.write(SNAPSHOT_FILE, Snapshot.serializer(), snapshot)
             val updatedAt = System.currentTimeMillis()

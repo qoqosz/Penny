@@ -5,7 +5,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.penny.data.BridgeClient
+import app.penny.data.BridgeFinder
 import app.penny.data.CurrencyRates
+import app.penny.data.DiscoveredBridge
 import app.penny.data.EcbRateSource
 import app.penny.data.HiddenAccounts
 import app.penny.data.IconStore
@@ -33,8 +35,10 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -71,10 +75,10 @@ class RepositoryTest {
 
     private fun dir(name: String) = File(folder.root, name)
 
-    private fun TestScope.repository(settings: Settings) = Repository(
+    private fun TestScope.repository(settings: Settings, discovery: BridgeFinder = BridgeFinder { null }) = Repository(
         settings = settings,
         client = BridgeClient(),
-        discovery = { null },
+        discovery = discovery,
         cache = JsonStore(dir("cache")),
         queue = PendingQueue(JsonStore(dir("queue"))),
         icons = IconStore(dir("icons")),
@@ -141,5 +145,29 @@ class RepositoryTest {
         assertEquals(1, repository.state.value.pending.size)
         assertEquals("12.50", repository.state.value.pending.single().request.amount)
         assertEquals(1, saved)
+    }
+
+    @Test fun `a refresh with nothing to send finds the Mac at its new address`() = runTest {
+        // Nothing listens at the old address any more.
+        val gone = MockWebServer().apply { start() }
+        val oldPort = gone.port
+        gone.shutdown()
+        val settings = Settings(dataStore(backgroundScope), FakeCipher)
+        settings.save(PairedBridge("Mac", server.hostName, oldPort, "secret"))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = when (request.path?.substringBefore('?')) {
+                "/api/v1/snapshot" -> MockResponse().setBody(
+                    """{"generation":"g1","bridgeVersion":"1.0.0","writesEnabled":true,"accounts":[],"categories":[],"payees":[]}""")
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        val repository = repository(settings) { name ->
+            DiscoveredBridge(name, server.hostName, server.port).takeIf { name == "Mac" }
+        }
+
+        repository.refresh(push = false)
+
+        assertEquals("g1", repository.state.value.snapshot?.generation)
+        assertEquals(server.port, settings.current()?.port)
     }
 }
